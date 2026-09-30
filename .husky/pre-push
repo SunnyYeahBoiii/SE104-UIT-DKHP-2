@@ -1,0 +1,3 @@
+# Chặn push khi lint hoặc typecheck lỗi. Turbo cache kết quả nên package không đổi sẽ bỏ qua.
+bun run format:check
+bunx turbo run lint typecheck --output-logs=errors-only

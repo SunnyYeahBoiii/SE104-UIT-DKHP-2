@@ -1,0 +1,10 @@
+{
+  "extends": "@dkhp/typescript-config/nestjs.json",
+  // Bun's transpiler does not follow `extends` into packages, so the decorator flags must be
+  // repeated here. Without them Bun emits TC39 decorators and Nest's DI breaks at runtime.
+  "compilerOptions": {
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

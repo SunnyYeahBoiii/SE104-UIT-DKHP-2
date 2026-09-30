@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.next/
+out/
+.turbo/
+coverage/
+bun.lock
+next-env.d.ts
+
+# Tài liệu viết tay: bảng markdown căn chỉnh thủ công
+docs/
+CONTEXT.md
