@@ -1,0 +1,23 @@
+# Dev-only backing services. The apps themselves run on the host with `bun dev` (ADR-0015).
+#   docker compose -f compose.dev.yml up -d
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: dkhp
+      POSTGRES_PASSWORD: dkhp
+      POSTGRES_DB: dkhp
+      TZ: Asia/Ho_Chi_Minh
+    ports:
+      - '5432:5432'
+    volumes:
+      # Postgres 18 images keep data under a versioned subdirectory of /var/lib/postgresql.
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U dkhp -d dkhp']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres-data:

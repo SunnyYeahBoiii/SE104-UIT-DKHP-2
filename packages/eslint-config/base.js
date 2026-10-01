@@ -5,7 +5,13 @@ import tseslint from 'typescript-eslint'
 
 /** Rules shared by every package. Prettier goes last so it turns off formatting rules. */
 export const baseConfig = defineConfig([
-  globalIgnores(['**/node_modules/**', '**/dist/**', '**/.turbo/**', '**/coverage/**']),
+  globalIgnores([
+    '**/node_modules/**',
+    '**/dist/**',
+    '**/.turbo/**',
+    '**/coverage/**',
+    '**/src/generated/**',
+  ]),
   js.configs.recommended,
   tseslint.configs.recommended,
   {

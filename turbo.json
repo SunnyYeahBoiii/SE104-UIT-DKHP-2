@@ -5,24 +5,29 @@
     "topo": {
       "dependsOn": ["^topo"]
     },
+    "db:generate": {
+      "inputs": ["prisma/schema.prisma", "prisma.config.ts"],
+      "outputs": ["src/generated/prisma/**"]
+    },
     "build": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["^build", "db:generate"],
       "inputs": ["$TURBO_DEFAULT$", ".env*"],
       "outputs": [".next/**", "!.next/cache/**", "!.next/dev/**", "dist/**"]
     },
     "lint": {
-      "dependsOn": ["topo"]
+      "dependsOn": ["topo", "db:generate"]
     },
     "typecheck": {
-      "dependsOn": ["topo"],
+      "dependsOn": ["topo", "db:generate"],
       "outputs": ["*.tsbuildinfo"]
     },
     "test": {
-      "dependsOn": ["topo"]
+      "dependsOn": ["topo", "db:generate"]
     },
     "dev": {
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "dependsOn": ["db:generate"]
     }
   }
 }

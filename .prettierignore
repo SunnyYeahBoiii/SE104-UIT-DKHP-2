@@ -10,3 +10,7 @@ next-env.d.ts
 # Tài liệu viết tay: bảng markdown căn chỉnh thủ công
 docs/
 CONTEXT.md
+
+# generated code
+apps/api/src/generated/
+apps/api/prisma/migrations/
