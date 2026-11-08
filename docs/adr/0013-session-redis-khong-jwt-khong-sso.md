@@ -6,12 +6,13 @@
 
 ## Bối cảnh
 
-Tài khoản do nhà trường cấp (Quản trị hoặc Phòng Đào tạo tạo, nhập hàng loạt), không tự đăng ký. Cần thu hồi
+Tài khoản sinh viên được tạo cùng hồ sơ do Phòng Đào tạo lập; tài khoản Phòng Đào tạo và Phòng Tài vụ nạp sẵn
+([ADR-0019](./0019-thu-hep-pham-vi-du-lieu-nen.md)). Không tự đăng ký. Cần thu hồi
 session ngay khi khoá tài khoản hoặc đổi vai trò, và có thao tác tài chính nhạy cảm.
 
 ## Quyết định
 
-- Chỉ có tài khoản nội bộ: mã số sinh viên hoặc mã cán bộ + mật khẩu. Bắt buộc đổi mật khẩu ở lần đăng nhập đầu.
+- Chỉ có tài khoản nội bộ: mã số sinh viên hoặc mã cán bộ + mật khẩu. Mật khẩu ban đầu và mật khẩu đặt lại là chuỗi ngẫu nhiên hiện một lần cho Phòng Đào tạo; bắt buộc đổi ở lần đăng nhập kế tiếp. Đặt lại mật khẩu xoá mọi session của tài khoản đó.
 - Băm argon2id qua `Bun.password`, bọc sau interface `PasswordHasher`.
 - Session opaque lưu trong Redis. Cookie `httpOnly; Secure; SameSite=Lax` trên domain gốc.
 - Hết hạn tuyệt đối 8 giờ cho mọi vai trò, không có idle timeout.

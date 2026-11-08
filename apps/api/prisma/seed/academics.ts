@@ -3,6 +3,7 @@ import {
   CourseType,
   EnrollmentStatus,
   GradebookStatus,
+  PracticeMode,
   PrerequisiteType,
   TermPhase,
   TermType,
@@ -28,7 +29,7 @@ const COHORT_PLANS: { cohort: string; major: string; terms: Record<string, strin
     terms: {
       '20251': ['IT007', 'IT007TH', 'SE104', 'SE104TH', 'SS003'],
       '20252': ['SE100', 'SE100TH', 'SE113', 'SE113TH'],
-      '20261': ['SE121', 'CS106'],
+      '20261': ['SE121', 'SE121TH', 'CS106'],
     },
   },
   { cohort: 'K19', major: 'KTPM', terms: { ...K19_HISTORY, '20261': ['SE104', 'SE104TH'] } },
@@ -64,7 +65,11 @@ const OPEN_TERM_OFFERINGS = [
   'CS106',
   'MA006',
   'SE121',
+  'SE121TH',
 ]
+
+/** DT-11: these theory sections run their practice as HT2 (one self-scheduled group); the rest use HT1. */
+const SELF_SCHEDULED = new Set(['SE121'])
 
 /** Extra theory sections beyond the first. */
 const EXTRA_SECTIONS: Record<string, number> = { [`${OPEN_TERM}:IT002`]: 1 }
@@ -72,7 +77,8 @@ const EXTRA_SECTIONS: Record<string, number> = { [`${OPEN_TERM}:IT002`]: 1 }
 /** Deliberately tiny sections, to show a full class (DK-09). */
 const CAPACITY_OVERRIDES: Record<string, number> = { [`${OPEN_TERM}:CS106`]: 1 }
 
-/** Registrations already made in the open term, by section code. `cancelled` lines were dropped (DK-13 switch). */
+/** Registrations already made in the open term, by section code. `cancelled` lines were cancelled before the
+ * student registered another section, since there is no switch (DK-13). */
 const OPEN_TERM_REGISTRATIONS: { student: string; sections: string[]; cancelled?: string[] }[] = [
   { student: DEMO.student, sections: ['MA006.P21'] },
   {
@@ -80,7 +86,7 @@ const OPEN_TERM_REGISTRATIONS: { student: string; sections: string[]; cancelled?
     sections: ['SE100.P21', 'SE100.P21.1', 'SE113.P21', 'SE113.P21.2', 'CS106.P21'],
   },
   { student: DEMO.improvement, sections: ['SE113.P21', 'SE113.P21.1'] },
-  { student: DEMO.retakeSwitched, sections: ['IT002.P22'], cancelled: ['IT002.P21'] },
+  { student: DEMO.retakeReregistered, sections: ['IT002.P22'], cancelled: ['IT002.P21'] },
 ]
 
 /** Whether the student studies in the term at all (HS-06). Shared with the tuition step. */
@@ -163,7 +169,7 @@ async function seedOfferings(
   const hasPractice = (c: CourseInfo) => courseCodes.has(`${c.code}TH`)
   const schedulable = [...courseCodes]
     .map((code) => must(catalog.courses, code))
-    .filter((c) => c.type === CourseType.THEORY || !c.companion)
+    .filter((c) => c.type === CourseType.THEORY)
     .sort(
       (a, b) =>
         Number(hasPractice(b)) - Number(hasPractice(a)) ||
@@ -176,15 +182,20 @@ async function seedOfferings(
     for (let sectionNumber = 1; sectionNumber <= sectionCount; sectionNumber++) {
       const code = `${course.code}.P${term.number}${sectionNumber}`
       const lecturer = takeLecturer()
-      // A standalone practice course (SE121, a project) has no fixed timetable: unscheduled sections never clash.
-      const meetings =
-        course.type === CourseType.THEORY ? [theoryMeeting(term, courseIndex, sectionNumber)] : []
+      const meetings = [theoryMeeting(term, courseIndex, sectionNumber)]
+      const capacity = CAPACITY_OVERRIDES[`${term.code}:${course.code}`] ?? 80
+      const practiceMode = !hasPractice(course)
+        ? null
+        : SELF_SCHEDULED.has(course.code)
+          ? PracticeMode.SELF_SCHEDULED
+          : PracticeMode.SCHEDULED
       const row = await db.courseSection.create({
         data: {
           offeredCourseId: must(offered, course.code),
           code,
           lecturerId: lecturer.id,
-          capacity: CAPACITY_OVERRIDES[`${term.code}:${course.code}`] ?? 80,
+          capacity,
+          practiceMode,
           meetings: { create: meetings },
         },
       })
@@ -199,15 +210,17 @@ async function seedOfferings(
 
       if (hasPractice(course)) {
         const practiceCourse = must(catalog.courses, `${course.code}TH`)
-        for (const group of [1, 2]) {
+        // HT1: two groups on alternating weeks. HT2: one group, no meetings, as large as the theory section.
+        const selfScheduled = practiceMode === PracticeMode.SELF_SCHEDULED
+        for (const group of selfScheduled ? [1] : [1, 2]) {
           const childLecturer = takeLecturer()
-          const childMeetings = [practiceMeeting(courseIndex, sectionNumber, group)]
+          const childMeetings = selfScheduled ? [] : [practiceMeeting(courseIndex, sectionNumber, group)]
           const child = await db.courseSection.create({
             data: {
               offeredCourseId: must(offered, practiceCourse.code),
               code: `${code}.${group}`,
               lecturerId: childLecturer.id,
-              capacity: 40,
+              capacity: selfScheduled ? capacity : 40,
               parentSectionId: row.id,
               meetings: { create: childMeetings },
             },
@@ -254,7 +267,8 @@ function assertNoConflicts(studentCode: string, termCode: string, chosen: Sectio
 type ComponentSeed = { name: string; weight: number; isFinal: boolean }
 
 function componentsFor(course: CourseInfo): ComponentSeed[] {
-  if (course.type === CourseType.PRACTICE && !course.companion)
+  // A self-scheduled project (SE121TH) is graded on its report alone.
+  if (course.type === CourseType.PRACTICE && course.companion && SELF_SCHEDULED.has(course.companion))
     return [{ name: 'Báo cáo đồ án', weight: 100, isFinal: true }]
   if (course.type === CourseType.PRACTICE) {
     return [
@@ -343,8 +357,8 @@ export async function seedAcademics(
           const own = (c: string) =>
             [...sections.values()].find((s) => s.course.code === c && !s.code.match(/\.\d+$/))
           let section: SectionInfo | undefined
-          if (course.type === CourseType.PRACTICE && course.companion) {
-            const parent = own(course.companion)
+          if (course.type === CourseType.PRACTICE) {
+            const parent = own(course.companion ?? '')
             section = parent?.children[student.index % parent.children.length]
           } else {
             section = own(code)

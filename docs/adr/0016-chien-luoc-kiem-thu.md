@@ -11,12 +11,13 @@ lệ coverage không nói lên việc từng quy tắc nghiệp vụ đã đư�
 
 ## Quyết định
 
-- **Unit test** (`bun test`) cho logic miền thuần: suy ra hình thức học, kết quả hiện hành, GPA, xếp loại, trùng lịch, tính phụ thu và giảm trừ.
+- **Unit test** (`bun test`) cho logic miền thuần: suy ra hình thức học, kết quả hiện hành, trùng lịch theo ngày học, tính phụ thu và giảm trừ.
 - **Integration test** (`bun test`) trên Postgres và Redis thật, dựng bằng `compose.test.yml`, gọi qua `CommandBus` thật.
 - **Test tranh chấp bắt buộc trong CI:**
   - 200 sinh viên giành lớp 50 chỗ → đúng 50 dòng đăng ký, `enrolled_count = 50`.
   - Một sinh viên gửi 10 request song song → không vượt tín chỉ tối đa, không trùng lịch, không trùng môn.
-  - Đổi lớp chéo A→B và B→A cùng lúc → không deadlock, bất biến giữ nguyên.
+  - Nhiều sinh viên cùng lúc huỷ hai chiều, người huỷ lớp LT, người huỷ nhóm thực hành của cùng các lớp → không deadlock, `enrolled_count` khớp số dòng còn hiệu lực.
+  - Một lượt đăng ký 5 lớp, trong đó có lớp đầy → các lớp còn lại vẫn vào, lớp đầy trả lý do riêng.
   - Cùng một webhook SePay gửi 5 lần → đúng 1 phiếu thu.
 - **Load test k6** 1000 VU trước mỗi lần release: p95 < 500 ms, 0 lỗi 5xx, 0 vi phạm bất biến (kiểm tra bằng SQL sau khi chạy).
 - **E2E Playwright** cho các luồng chính, có viewport di động.

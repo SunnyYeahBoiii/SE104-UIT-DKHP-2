@@ -22,7 +22,8 @@ Postgres là nguồn sự thật duy nhất cho mọi bất biến ghi. Trong m�
 3. **Giành chỗ cuối cùng** bằng câu lệnh điều kiện nguyên tử:
    `UPDATE course_section SET enrolled_count = enrolled_count + 1 WHERE id = $1 AND enrolled_count < capacity`.
    Nếu 0 hàng bị ảnh hưởng thì lớp đã đầy và rollback. Làm cuối để giữ khoá hàng nóng trong thời gian ngắn nhất.
-4. Thứ tự khoá cố định: phiếu trước, sau đó các lớp theo id tăng dần (LT + TH, đổi lớp), để không deadlock.
+4. Thứ tự khoá cố định: phiếu trước, sau đó các lớp theo id tăng dần, để không deadlock. Giành chỗ chỉ đụng một lớp; chỉ huỷ hai chiều (lớp LT và nhóm thực hành, DK-11) mới đụng hai lớp.
+5. Một lượt đăng ký nhiều lớp (DK-18) xử lý từng lớp trong transaction riêng, theo thứ tự trong lượt. Lớp này rollback không ảnh hưởng lớp khác.
 
 Lưới an toàn ở tầng DB:
 

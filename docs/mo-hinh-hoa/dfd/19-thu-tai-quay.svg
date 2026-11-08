@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 320" width="680" height="320" font-family="'Times New Roman', Times, serif">
+  <defs>
+    <marker id="solid" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#000"/>
+    </marker>
+    <marker id="dotted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8b0a3a"/>
+    </marker>
+  </defs>
+  <rect width="680" height="320" fill="#fff"/>
+  <rect x="265" y="10" width="150" height="38" fill="#1f5fbf" stroke="#7aa7e6" stroke-width="2"/>
+  <text x="340" y="37" font-size="22" fill="#fff" text-anchor="middle">Người dùng</text>
+  <line x1="320" y1="48" x2="320" y2="106" stroke="#000" stroke-width="2.5" marker-end="url(#solid)"/>
+  <text x="292" y="80" font-size="15" font-weight="bold" fill="#000">D1</text>
+  <line x1="360" y1="106" x2="360" y2="50" stroke="#8b0a3a" stroke-width="2.5" stroke-dasharray="3 3" marker-end="url(#dotted)"/>
+  <text x="368" y="80" font-size="15" font-weight="bold" fill="#8b0a3a">D6</text>
+  <rect x="10" y="131" width="108" height="38" fill="#1f5fbf" stroke="#7aa7e6" stroke-width="2"/>
+  <text x="64" y="158" font-size="22" fill="#fff" text-anchor="middle">Tb nhập</text>
+  <line x1="120" y1="150" x2="158" y2="150" stroke="#8b0a3a" stroke-width="2.5" stroke-dasharray="3 3" marker-end="url(#dotted)"/>
+  <text x="126" y="140" font-size="15" font-weight="bold" fill="#8b0a3a">D2</text>
+  <ellipse cx="340" cy="150" rx="180" ry="42" fill="#33e033"/>
+  <text x="340" y="145" font-size="22" fill="#fff" text-anchor="middle">Lập phiếu thu</text>
+  <text x="340" y="171" font-size="22" fill="#fff" text-anchor="middle">tại quầy</text>
+  <line x1="522" y1="150" x2="560" y2="150" stroke="#000" stroke-width="2.5" marker-end="url(#solid)"/>
+  <text x="530" y="140" font-size="15" font-weight="bold" fill="#000">D5</text>
+  <rect x="562" y="131" width="108" height="38" fill="#1f5fbf" stroke="#7aa7e6" stroke-width="2"/>
+  <text x="616" y="158" font-size="22" fill="#fff" text-anchor="middle">Tb xuất</text>
+  <line x1="320" y1="252" x2="320" y2="194" stroke="#000" stroke-width="2.5" marker-end="url(#solid)"/>
+  <text x="292" y="225" font-size="15" font-weight="bold" fill="#000">D3</text>
+  <line x1="360" y1="194" x2="360" y2="250" stroke="#000" stroke-width="2.5" marker-end="url(#solid)"/>
+  <text x="368" y="225" font-size="15" font-weight="bold" fill="#000">D4</text>
+  <line x1="220" y1="256" x2="460" y2="256" stroke="#1f5fbf" stroke-width="1.5"/>
+  <text x="340" y="284" font-size="22" fill="#1f5fbf" text-anchor="middle">Bộ nhớ</text>
+  <line x1="220" y1="296" x2="460" y2="296" stroke="#1f5fbf" stroke-width="1.5"/>
+</svg>

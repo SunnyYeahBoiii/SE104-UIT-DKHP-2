@@ -252,7 +252,9 @@ enum CourseType {
 }
 
 /// DT-01/DT-02: one type per course; credits = totalPeriods / 15 (THEORY) or / 30 (PRACTICE).
-/// A course with both parts is two courses; the PRACTICE one may point at its companion THEORY course.
+/// A course with both parts is two courses (ADR-0002): every PRACTICE course points at exactly one companion
+/// THEORY course (CHECK), and a THEORY course has at most one PRACTICE course (unique). The PRACTICE code is
+/// the THEORY code plus `TH`, e.g. IT004 / IT004TH.
 model Course {
   id                      Int        @id @default(autoincrement())
   code                    String     @unique
@@ -462,19 +464,29 @@ model OfferedCourse {
   @@map("offered_course")
 }
 
+/// DT-11: set on a THEORY section that has practice sections and shared by all of them; frozen once the term
+/// leaves PREPARATION. SCHEDULED (HT1): one or two sections with fixed meetings. SELF_SCHEDULED (HT2): exactly
+/// one section with no meetings and the same capacity as the THEORY section.
+enum PracticeMode {
+  SCHEDULED
+  SELF_SCHEDULED
+}
+
 /// The unit students register for, e.g. SE104.P21. A PracticeSection (SE104.P21.1) belongs to a PRACTICE
-/// course offering and points at its parent section of the companion THEORY course (ADR-0002).
+/// course offering and points at its parent section of the companion THEORY course (ADR-0002); a parent has
+/// at most two, coded `.1` and `.2`. Only the parent carries `practiceMode`.
 /// `enrolledCount` is only changed by the conditional UPDATE in ADR-0005 and guarded by a CHECK.
 model CourseSection {
-  id              Int      @id @default(autoincrement())
-  offeredCourseId Int      @map("offered_course_id")
+  id              Int           @id @default(autoincrement())
+  offeredCourseId Int           @map("offered_course_id")
   code            String
-  lecturerId      Int?     @map("lecturer_id")
+  lecturerId      Int?          @map("lecturer_id")
   capacity        Int
-  enrolledCount   Int      @default(0) @map("enrolled_count")
-  parentSectionId Int?     @map("parent_section_id")
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  enrolledCount   Int           @default(0) @map("enrolled_count")
+  parentSectionId Int?          @map("parent_section_id")
+  practiceMode    PracticeMode? @map("practice_mode")
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   offeredCourse    OfferedCourse   @relation(fields: [offeredCourseId], references: [id])
   lecturer         Lecturer?       @relation(fields: [lecturerId], references: [id])

@@ -104,19 +104,25 @@ type CourseSeed = {
   companion?: string
 }
 
-const theoryWithPractice = (code: string, name: string, faculty: string): CourseSeed[] => [
-  { code, name, type: CourseType.THEORY, periods: 45, faculty },
+const theoryWithPractice = (
+  code: string,
+  name: string,
+  faculty: string,
+  periods = { theory: 45, practice: 30 },
+): CourseSeed[] => [
+  { code, name, type: CourseType.THEORY, periods: periods.theory, faculty },
   {
     code: `${code}TH`,
     name: `${name} - Thực hành`,
     type: CourseType.PRACTICE,
-    periods: 30,
+    periods: periods.practice,
     faculty,
     companion: code,
   },
 ]
 
-/** DT-01: a course with both parts is two courses; practice codes carry a TH suffix. */
+/** DT-01: a course with both parts is two courses; practice codes carry a TH suffix. There is no practice
+ * course without a theory one, so even a project (SE121) is a theory course plus a practice course. */
 const COURSES: CourseSeed[] = [
   { code: 'MA003', name: 'Đại số tuyến tính', type: CourseType.THEORY, periods: 45 },
   { code: 'MA006', name: 'Giải tích', type: CourseType.THEORY, periods: 60 },
@@ -131,7 +137,7 @@ const COURSES: CourseSeed[] = [
   ...theoryWithPractice('SE104', 'Nhập môn công nghệ phần mềm', 'CNPM'),
   ...theoryWithPractice('SE100', 'Phương pháp phát triển phần mềm hướng đối tượng', 'CNPM'),
   ...theoryWithPractice('SE113', 'Kiểm chứng phần mềm', 'CNPM'),
-  { code: 'SE121', name: 'Đồ án 1', type: CourseType.PRACTICE, periods: 60, faculty: 'CNPM' },
+  ...theoryWithPractice('SE121', 'Đồ án 1', 'CNPM', { theory: 15, practice: 30 }),
   {
     code: 'CS106',
     name: 'Trí tuệ nhân tạo',
@@ -205,7 +211,7 @@ const CURRICULA: Record<string, { minTotalCredits: number; blocks: BlockSeed[] }
       {
         name: 'Chuyên ngành bắt buộc',
         type: KnowledgeBlockType.REQUIRED,
-        courses: [...pair('SE104', 5), ['SE121', 6]],
+        courses: [...pair('SE104', 5), ...pair('SE121', 6)],
       },
       {
         name: 'Chuyên ngành tự chọn',

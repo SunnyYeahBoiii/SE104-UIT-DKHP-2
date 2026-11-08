@@ -14,7 +14,7 @@ CQRS đầy đủ (read model riêng, event sourcing) tăng độ phức tạp k
 ## Quyết định
 
 - Dùng `CommandBus` / `QueryBus` của `@nestjs/cqrs`. Command đi qua domain logic + transaction. Query đọc thẳng bằng SQL trên cùng database, không có read model riêng.
-- Sự kiện **quan trọng** (khoá điểm, thanh toán ghi nhận, cấm thi, cần tự huỷ lớp) được ghi vào bảng `outbox` trong **cùng transaction** với thay đổi. Worker relay đẩy sang BullMQ.
+- Sự kiện **quan trọng** (thanh toán ghi nhận, cần tự huỷ lớp) được ghi vào bảng `outbox` trong **cùng transaction** với thay đổi. Worker relay đẩy sang BullMQ.
 - `EventBus` trong tiến trình chỉ dùng cho việc không quan trọng (ví dụ xoá cache).
 - Không dùng `@Saga()`, không event sourcing.
 - Interceptor ghi nhật ký kiểm toán cho mọi command.

@@ -6,7 +6,7 @@
 
 ## Bối cảnh
 
-Hệ thống có vài miền rõ ràng (hồ sơ, đào tạo, đăng ký, điểm, học phí), nhưng các bất biến quan trọng cắt ngang
+Hệ thống có vài miền rõ ràng (dữ liệu nền, đào tạo, đăng ký, học phí), nhưng các bất biến quan trọng cắt ngang
 miền. Ví dụ đăng ký phải đọc kết quả hiện hành (điểm) và ghi phụ thu (học phí) trong cùng transaction. Nhóm nhỏ,
 triển khai bằng Docker Compose.
 
@@ -14,13 +14,12 @@ triển khai bằng Docker Compose.
 
 Một ứng dụng NestJS, chia module theo miền:
 
-- `identity` (tài khoản, vai trò, session)
-- `student-records` (hồ sơ, trạng thái, đối tượng ưu tiên)
-- `academics` (môn học, chương trình học, học kỳ, môn mở, lớp, lịch)
-- `registration`
-- `grading`
+- `identity` (tài khoản, đăng nhập, đổi và đặt lại mật khẩu, session)
+- `students` (hồ sơ sinh viên, đối tượng ưu tiên, khoá; tạo hồ sơ gọi `identity` tạo tài khoản trong cùng transaction, sửa hồ sơ gọi `tuition` tính lại học phí)
+- `academics` (đọc dữ liệu nền; học kỳ, khung giờ, nhập thời khoá biểu, môn mở, lớp, lịch)
+- `registration` (gồm đọc điểm và kết quả hiện hành)
 - `tuition` (bảng phí, sổ cái, thanh toán, SePay)
-- `notification`, `audit`
+- `notification` (email đóng đủ), `audit`
 
 Quy ước:
 

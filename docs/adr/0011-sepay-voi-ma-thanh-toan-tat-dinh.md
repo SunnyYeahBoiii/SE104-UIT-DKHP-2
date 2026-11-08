@@ -25,7 +25,6 @@ viên được đóng nhiều lần (QĐ6), và có thể chuyển thiếu, chuy
 - Không khớp được mã thì vào hàng chờ gán thủ công của Phòng Tài vụ.
 - Đối soát hằng ngày bằng API SePay.
 - Thu tại quầy dùng cùng cấu trúc phiếu thu, kênh `COUNTER`.
-- Cấm thi xét theo `transactionDate` của ngân hàng.
 
 ## Hệ quả
 

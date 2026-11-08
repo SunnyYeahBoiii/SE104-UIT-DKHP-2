@@ -8,7 +8,7 @@
 
 Phần lớn dữ liệu là CRUD bình thường. Nhưng đường đăng ký cần SQL chính xác: `SELECT … FOR UPDATE`, `UPDATE …
 WHERE enrolled_count < capacity` trả số hàng, partial unique index, CHECK constraint, và kiểm tra trùng lịch bằng
-phép AND bit trên tập tuần.
+so ngày học của buổi (ngày bắt đầu, ngày kết thúc, nhịp mỗi tuần hoặc cách tuần).
 
 ## Quyết định
 

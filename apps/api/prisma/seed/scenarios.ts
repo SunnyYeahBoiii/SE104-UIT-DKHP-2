@@ -15,8 +15,9 @@ export const DEMO = {
   twoPriorityGroups: '24520004',
   /** Overpaid 20252; the credit balance is carried into 20261 (HP-11). */
   overpaid: '24520005',
-  /** Failed IT002 theory in 20251, passed its practice; retakes theory alone in 20262 (DK-12) after switching sections. */
-  retakeSwitched: '24520009',
+  /** Failed IT002 theory in 20251, passed its practice; retakes theory alone in 20262 (DK-12), having cancelled
+   * one section and registered another, since there is no switch (DK-13). */
+  retakeReregistered: '24520009',
   /** Failed IT003 theory in 20251 and retook it in summer 20253, where every line carries a surcharge (HP-03). */
   summerRetake: '24520010',
   /** Unpaid at the 20252 deadline: exam ban, final scores 0, paid late but the ban stays (CT-01..03). */
@@ -33,7 +34,7 @@ export const DEMO = {
 
 /** Course scores (tenths) forced for specific (student, term, course) to create failures. */
 export const FORCED_SCORES: Record<string, number> = {
-  [`${DEMO.retakeSwitched}:20251:IT002`]: 38,
+  [`${DEMO.retakeReregistered}:20251:IT002`]: 38,
   [`${DEMO.summerRetake}:20251:IT003`]: 42,
 }
 
