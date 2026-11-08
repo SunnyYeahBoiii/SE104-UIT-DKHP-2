@@ -214,7 +214,9 @@ async function seedOfferings(
         const selfScheduled = practiceMode === PracticeMode.SELF_SCHEDULED
         for (const group of selfScheduled ? [1] : [1, 2]) {
           const childLecturer = takeLecturer()
-          const childMeetings = selfScheduled ? [] : [practiceMeeting(courseIndex, sectionNumber, group)]
+          const childMeetings = selfScheduled
+            ? []
+            : [practiceMeeting(courseIndex, sectionNumber, group)]
           const child = await db.courseSection.create({
             data: {
               offeredCourseId: must(offered, practiceCourse.code),
@@ -268,7 +270,11 @@ type ComponentSeed = { name: string; weight: number; isFinal: boolean }
 
 function componentsFor(course: CourseInfo): ComponentSeed[] {
   // A self-scheduled project (SE121TH) is graded on its report alone.
-  if (course.type === CourseType.PRACTICE && course.companion && SELF_SCHEDULED.has(course.companion))
+  if (
+    course.type === CourseType.PRACTICE &&
+    course.companion &&
+    SELF_SCHEDULED.has(course.companion)
+  )
     return [{ name: 'Báo cáo đồ án', weight: 100, isFinal: true }]
   if (course.type === CourseType.PRACTICE) {
     return [
