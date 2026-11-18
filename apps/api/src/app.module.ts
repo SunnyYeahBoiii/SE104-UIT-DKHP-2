@@ -11,6 +11,7 @@ import { FinanceModule } from './finance/finance.module'
 import { HealthController } from './health/health.controller'
 import { MonitoringModule } from './monitoring/monitoring.module'
 import { PaymentModule } from './payments/payment.module'
+import { ReconciliationModule } from './payments/reconciliation.worker'
 import { sepayQueueConnection } from './payments/sepay.service'
 import { SepayModule } from './payments/sepay.worker'
 import { PrismaModule } from './prisma/prisma.module'
@@ -33,6 +34,7 @@ import { TuitionModule } from './tuition/tuition.module'
     TuitionModule,
     PaymentModule,
     SepayModule,
+    ReconciliationModule,
   ],
   controllers: [HealthController],
   providers: [

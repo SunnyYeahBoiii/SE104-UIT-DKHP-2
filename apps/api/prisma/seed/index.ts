@@ -9,6 +9,7 @@ import { seedCatalog } from './catalog'
 import { createClient, type Db } from './lib'
 import { seedParameters } from './parameters'
 import { seedPeople } from './people'
+import { seedReconciliation } from './reconciliation'
 import { DEMO, DEV_PASSWORD } from './scenarios'
 import { seedTerms } from './terms'
 import { seedTuition } from './tuition'
@@ -39,6 +40,7 @@ async function main() {
     const enrollments = await seedAcademics(db, catalog, people, terms)
     await seedTuition(db, catalog, people, terms, enrollments)
     await seedParameters(db, people.finance)
+    await seedReconciliation(db)
 
     const counts = {
       users: await db.user.count(),
@@ -52,6 +54,7 @@ async function main() {
       ledgerEntries: await db.ledgerEntry.count(),
       receipts: await db.receipt.count(),
       bankTransactions: await db.bankTransaction.count(),
+      reconciliationRuns: await db.reconciliationRun.count(),
     }
     console.table(counts)
     console.log(

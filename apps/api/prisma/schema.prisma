@@ -623,18 +623,66 @@ model BankTransaction {
   matchedStudentId Int?                  @map("matched_student_id")
   matchedTermId    Int?                  @map("matched_term_id")
   assignedById     Int?                  @map("assigned_by_id")
+  /// TT-08: set when this row was backfilled by the daily reconciliation, not by the webhook.
+  reconciliationRunId Int?               @map("reconciliation_run_id")
   rawPayload       Json                  @map("raw_payload")
   receivedAt       DateTime              @default(now()) @map("received_at") @db.Timestamptz(3)
   processedAt      DateTime?             @map("processed_at") @db.Timestamptz(3)
 
-  matchedStudent Student? @relation(fields: [matchedStudentId], references: [id])
-  matchedTerm    Term?    @relation(fields: [matchedTermId], references: [id])
-  assignedBy     User?    @relation(fields: [assignedById], references: [id])
-  receipt        Receipt?
+  matchedStudent  Student?            @relation(fields: [matchedStudentId], references: [id])
+  matchedTerm     Term?               @relation(fields: [matchedTermId], references: [id])
+  assignedBy      User?               @relation(fields: [assignedById], references: [id])
+  receipt         Receipt?
+  reconciliationRun ReconciliationRun? @relation(fields: [reconciliationRunId], references: [id])
+  discrepancies   ReconciliationDiscrepancy[]
 
   @@index([status])
   @@index([code])
+  @@index([reconciliationRunId])
   @@map("bank_transaction")
+}
+
+/// TT-08/QĐ21: one daily comparison. The unique date makes a rerun of the same day a no-op.
+model ReconciliationRun {
+  id              Int      @id @default(autoincrement())
+  /// The reconciled Vietnam calendar day, stored as UTC midnight of that date.
+  date            DateTime @unique @db.Date
+  bankCount       Int      @map("bank_count")
+  systemCount     Int      @map("system_count")
+  backfilledCount Int      @map("backfilled_count")
+  residualCount   Int      @map("residual_count")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  backfilledTransactions BankTransaction[]
+  discrepancies          ReconciliationDiscrepancy[]
+
+  @@map("reconciliation_run")
+}
+
+/// QĐ21.2: the residual differences are read-only; the finance office resolves them outside the system.
+enum ReconciliationDiscrepancyType {
+  /// Saved in the system but absent from the bank list for that day.
+  MISSING_AT_BANK
+  /// Present on both sides with the same SePay id but different amounts.
+  AMOUNT_MISMATCH
+}
+
+model ReconciliationDiscrepancy {
+  id               Int                            @id @default(autoincrement())
+  runId            Int                            @map("run_id")
+  type             ReconciliationDiscrepancyType
+  sepayId          BigInt?                        @map("sepay_id")
+  bankTransactionId Int?                          @map("bank_transaction_id")
+  bankAmount       BigInt?                        @map("bank_amount")
+  systemAmount     BigInt?                        @map("system_amount")
+  detail           String?
+  createdAt        DateTime                       @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  run             ReconciliationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  bankTransaction BankTransaction?  @relation(fields: [bankTransactionId], references: [id])
+
+  @@index([runId])
+  @@map("reconciliation_discrepancy")
 }
 
 // ─────────────────────────── Infrastructure ───────────────────────────
