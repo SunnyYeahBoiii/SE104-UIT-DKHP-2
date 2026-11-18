@@ -3,6 +3,7 @@ import { describe, expect, it } from 'bun:test'
 import {
   cohortsWithoutSlots,
   editableMilestones,
+  nextTermPhase,
   slotState,
   termPhase,
   validateCreditLimits,
@@ -36,6 +37,17 @@ describe('HK-03: phase derived from milestones', () => {
     expect(termPhase(m, vn('2027-01-06', '10:00'))).toBe('REGISTRATION')
     expect(termPhase(m, vn('2027-01-19', '10:00'))).toBe('ADJUSTMENT')
     expect(termPhase(m, vn('2027-02-01', '10:00'))).toBe('IN_PROGRESS')
+  })
+
+  it('HK-03: the job advances exactly one phase per milestone and never rewinds', () => {
+    const m = milestones()
+    expect(nextTermPhase('PREPARATION', m, vn('2027-01-04', '23:59'))).toBeNull()
+    expect(nextTermPhase('PREPARATION', m, m.registrationStartAt)).toBe('REGISTRATION')
+    expect(nextTermPhase('REGISTRATION', m, m.registrationStartAt)).toBeNull()
+    expect(nextTermPhase('REGISTRATION', m, m.adjustmentStartAt)).toBe('ADJUSTMENT')
+    expect(nextTermPhase('ADJUSTMENT', m, m.adjustmentEndAt)).toBe('IN_PROGRESS')
+    expect(nextTermPhase('IN_PROGRESS', m, vn('2027-06-01'))).toBeNull()
+    expect(nextTermPhase('CLOSED', m, vn('2027-06-01'))).toBeNull()
   })
 })
 
