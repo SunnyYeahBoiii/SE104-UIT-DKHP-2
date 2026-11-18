@@ -8,7 +8,7 @@ import { PaymentModule } from './payment.module'
 import { SepayWebhookController } from './sepay.controller'
 import {
   PROCESS_TRANSACTION_JOB,
-  registrationConnection,
+  sepayQueueConnection,
   SEPAY_QUEUE,
   SepayService,
 } from './sepay.service'
@@ -31,7 +31,7 @@ export class SepayProcessor extends WorkerHost {
     PrismaModule,
     PaymentModule,
     FinanceModule,
-    BullModule.registerQueue({ name: SEPAY_QUEUE, connection: registrationConnection() }),
+    BullModule.registerQueue({ name: SEPAY_QUEUE, connection: sepayQueueConnection() }),
   ],
   controllers: [SepayWebhookController],
   providers: [SepayService, SepayProcessor],

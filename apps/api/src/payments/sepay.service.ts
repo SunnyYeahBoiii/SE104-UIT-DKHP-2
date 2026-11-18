@@ -16,8 +16,9 @@ import {
 export const SEPAY_QUEUE = 'sepay'
 export const PROCESS_TRANSACTION_JOB = 'process'
 
-export function registrationConnection() {
-  const url = new URL(process.env.REGISTRATION_REDIS_URL ?? 'redis://localhost:6379/6')
+/** ADR-0010: money jobs live on the queue Redis (6380, noeviction), never on the evictable cache. */
+export function sepayQueueConnection() {
+  const url = new URL(process.env.QUEUE_REDIS_URL ?? 'redis://localhost:6380/11')
   return {
     host: url.hostname,
     port: Number(url.port || 6379),

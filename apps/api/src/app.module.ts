@@ -11,7 +11,7 @@ import { FinanceModule } from './finance/finance.module'
 import { HealthController } from './health/health.controller'
 import { MonitoringModule } from './monitoring/monitoring.module'
 import { PaymentModule } from './payments/payment.module'
-import { registrationConnection } from './payments/sepay.service'
+import { sepayQueueConnection } from './payments/sepay.service'
 import { SepayModule } from './payments/sepay.worker'
 import { PrismaModule } from './prisma/prisma.module'
 import { RegistrationModule } from './registration/registration.module'
@@ -22,7 +22,7 @@ import { TuitionModule } from './tuition/tuition.module'
 @Module({
   imports: [
     PrismaModule,
-    BullModule.forRoot({ connection: registrationConnection() }),
+    BullModule.forRoot({ connection: sepayQueueConnection() }),
     AuthModule,
     StudentsModule,
     RegistrationModule,
