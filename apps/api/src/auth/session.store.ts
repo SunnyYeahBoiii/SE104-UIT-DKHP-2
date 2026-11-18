@@ -81,6 +81,11 @@ export class SessionStore implements OnModuleDestroy {
       .exec()
   }
 
+  /** Registrar password reset and profile deletion revoke every device at once (ADR-0013). */
+  async deleteAll(userId: number): Promise<void> {
+    await this.deleteAllExcept(userId, '')
+  }
+
   /** Changing/resetting a password revokes every other session at once (ADR-0013). */
   async deleteAllExcept(userId: number, keepId: string): Promise<void> {
     const ids = (await this.redis.smembers(this.indexKey(userId))).filter((id) => id !== keepId)

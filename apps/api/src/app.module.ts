@@ -7,9 +7,10 @@ import { AllExceptionsFilter } from './common/all-exceptions.filter'
 import { RequestIdMiddleware } from './common/request-id.middleware'
 import { HealthController } from './health/health.controller'
 import { PrismaModule } from './prisma/prisma.module'
+import { StudentsModule } from './students/students.module'
 
 @Module({
-  imports: [PrismaModule, AuthModule],
+  imports: [PrismaModule, AuthModule, StudentsModule],
   controllers: [HealthController],
   providers: [
     Reflector,
