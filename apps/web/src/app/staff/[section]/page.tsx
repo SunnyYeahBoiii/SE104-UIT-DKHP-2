@@ -2,6 +2,7 @@ import { AcademicCatalog } from '@/components/academic-catalog'
 import { Bm7Page } from '@/components/finance/bm7-page'
 import { DebtPage } from '@/components/finance/debt-page'
 import { ReceiptsPage } from '@/components/finance/receipts-page'
+import { CounterPage } from '@/components/counter/counter-page'
 import { FinanceSettings } from '@/components/finance-settings'
 import { RegistrationMonitor } from '@/components/monitoring/registration-monitor'
 import { EmptyPlaceholder } from '@/components/placeholder'
@@ -28,6 +29,7 @@ export default async function StaffSectionPage({
   params: Promise<{ section: string }>
 }) {
   const { section } = await params
+  if (section === 'counter') return <CounterPage />
   if (section === 'groups') return <AcademicCatalog />
   if (section === 'sections') return <TimetablePage />
   if (section === 'registration') return <RegistrationMonitor />

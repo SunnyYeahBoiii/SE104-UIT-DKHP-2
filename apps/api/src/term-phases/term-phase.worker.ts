@@ -3,6 +3,7 @@ import { Injectable, Module, type OnApplicationBootstrap } from '@nestjs/common'
 import type { Job, Queue } from 'bullmq'
 
 import { Clock } from '../academics/clock'
+import { EmailModule } from '../payments/email.worker'
 import { PrismaModule } from '../prisma/prisma.module'
 import { PrerequisiteReviewModule } from '../registration/prerequisite-review.worker'
 import { TuitionModule } from '../tuition/tuition.module'
@@ -62,6 +63,7 @@ export class TermPhasesModule {}
     BullModule.forRoot({ connection: queueConnection() }),
     TermPhasesModule,
     PrerequisiteReviewModule,
+    EmailModule,
   ],
 })
 export class WorkerModule {}

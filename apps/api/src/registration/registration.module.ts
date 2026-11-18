@@ -9,6 +9,6 @@ import { RegistrationIdempotency } from './idempotency'
   imports: [TuitionModule],
   controllers: [RegistrationController],
   providers: [RegistrationService, RegistrationClock, RegistrationIdempotency],
-  exports: [RegistrationService],
+  exports: [RegistrationService, RegistrationIdempotency],
 })
 export class RegistrationModule {}

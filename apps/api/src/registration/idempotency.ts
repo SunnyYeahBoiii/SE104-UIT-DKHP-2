@@ -49,7 +49,7 @@ export class RegistrationIdempotency implements OnModuleDestroy {
 
   /** Replaying a key returns the original result, including the original error. */
   async run<T>(
-    scope: 'register' | 'cancel',
+    scope: 'register' | 'cancel' | 'payment',
     userId: number,
     key: string,
     work: () => Promise<T>,

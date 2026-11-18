@@ -1,6 +1,6 @@
 'use client'
 
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react'
+import type { ButtonHTMLAttributes, ComponentProps, InputHTMLAttributes, ReactNode } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
 import { useState } from 'react'
 
@@ -38,7 +38,7 @@ export function Button({
   )
 }
 
-export function Input({ className = '', ...rest }: InputHTMLAttributes<HTMLInputElement>) {
+export function Input({ className = '', ...rest }: ComponentProps<'input'>) {
   return (
     <input
       {...rest}

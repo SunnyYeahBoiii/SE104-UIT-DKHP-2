@@ -9,6 +9,7 @@ import { RequestIdMiddleware } from './common/request-id.middleware'
 import { FinanceModule } from './finance/finance.module'
 import { HealthController } from './health/health.controller'
 import { MonitoringModule } from './monitoring/monitoring.module'
+import { PaymentModule } from './payments/payment.module'
 import { PrismaModule } from './prisma/prisma.module'
 import { RegistrationModule } from './registration/registration.module'
 import { StudentsModule } from './students/students.module'
@@ -26,6 +27,7 @@ import { TuitionModule } from './tuition/tuition.module'
     MonitoringModule,
     FinanceModule,
     TuitionModule,
+    PaymentModule,
   ],
   controllers: [HealthController],
   providers: [
