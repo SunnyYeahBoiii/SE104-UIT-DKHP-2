@@ -14,6 +14,8 @@ import { RegistrationClock, RegistrationService } from '../src/registration/regi
 import { RegistrationIdempotency } from '../src/registration/idempotency'
 import { PrismaService } from '../src/prisma/prisma.service'
 import { DEMO_NOW } from '../prisma/seed/scenarios'
+import { ReceivingAccountService } from '../src/finance/receiving-account.service'
+import { TuitionService } from '../src/tuition/tuition.service'
 
 const PASSWORD = 'Dkhp@2026'
 const suffix = randomUUID().slice(0, 6)
@@ -76,8 +78,9 @@ describe('registration (integration: Postgres dkhp_w46 + Redis 14, demo clock 06
     await prisma.onModuleInit()
     idempotency = new RegistrationIdempotency()
     redis = new Redis('redis://localhost:6379/14', { maxRetriesPerRequest: 1 })
-    service = new RegistrationService(prisma, new FakeClock(), idempotency)
-    early = new RegistrationService(prisma, new EarlyClock(), idempotency)
+    const tuition = new TuitionService(prisma, new ReceivingAccountService(prisma))
+    service = new RegistrationService(prisma, new FakeClock(), idempotency, tuition)
+    early = new RegistrationService(prisma, new EarlyClock(), idempotency, tuition)
     termId = (await prisma.term.findUniqueOrThrow({ where: { termCode: '20262' } })).id
     cquiId = (await prisma.trainingSystem.findUniqueOrThrow({ where: { code: 'CQUI' } })).id
     const k19 = await prisma.cohort.findUniqueOrThrow({ where: { code: 'K19' } })

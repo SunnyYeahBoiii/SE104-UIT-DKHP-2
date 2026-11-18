@@ -12,6 +12,7 @@ import { PrismaModule } from './prisma/prisma.module'
 import { RegistrationModule } from './registration/registration.module'
 import { StudentsModule } from './students/students.module'
 import { TimetableModule } from './timetable/timetable.module'
+import { TuitionModule } from './tuition/tuition.module'
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { TimetableModule } from './timetable/timetable.module'
     AcademicsModule,
     TimetableModule,
     FinanceModule,
+    TuitionModule,
   ],
   controllers: [HealthController],
   providers: [

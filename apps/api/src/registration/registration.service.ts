@@ -19,8 +19,10 @@ import {
   type RegistrationSlot,
   type RegistrationSlotCohort,
   type Term,
+  TermType,
 } from '../generated/prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
+import { TuitionService } from '../tuition/tuition.service'
 import { RegistrationIdempotency } from './idempotency'
 import {
   attemptTypeOf,
@@ -132,6 +134,16 @@ const milestonesOf = (term: Term): MilestoneValues => ({
   tuitionDeadline: term.tuitionDeadline,
 })
 
+/** HP-03: retake/improvement in a main term and every summer line are charged per credit. */
+export function surchargeFor(
+  termType: TermType,
+  attempt: AttemptType,
+  credits: number,
+  rate: bigint,
+): bigint {
+  return termType === TermType.SUMMER || attempt !== AttemptType.FIRST ? BigInt(credits) * rate : 0n
+}
+
 const termName = (term: TermRecord): string => {
   const kind = term.type === 'SUMMER' ? 'HK hè' : term.type === 'FIRST' ? 'HK1' : 'HK2'
   return `${kind} ${term.academicYear.startYear}–${term.academicYear.startYear + 1}`
@@ -221,6 +233,7 @@ export class RegistrationService {
     private readonly prisma: PrismaService,
     private readonly clock: RegistrationClock,
     private readonly idempotency: RegistrationIdempotency,
+    private readonly tuition: TuitionService,
   ) {}
 
   async overview(userId: number, filters: SectionFilters) {
@@ -322,6 +335,13 @@ export class RegistrationService {
           WHERE id = ${enrollment.sectionId} AND enrolled_count > 0`
         if (released !== 1)
           this.fail('SEAT_RELEASE_FAILED', 'Không trả được chỗ. Vui lòng thử lại.', 409)
+        await this.tuition.reverseSurcharge(tx, {
+          enrollmentId,
+          studentId: student.id,
+          termId: termRecord.id,
+          sectionCode: enrollment.section.code,
+          at,
+        })
         const section = await tx.courseSection.findUniqueOrThrow({
           where: { id: enrollment.sectionId },
         })
@@ -536,8 +556,7 @@ export class RegistrationService {
 
         const rates = await this.rates(tx, context.student)
         const rate = course.type === CourseType.THEORY ? rates.theory : rates.practice
-        const surcharge =
-          attemptType === AttemptType.FIRST ? 0n : BigInt(section.offeredCourse.credits) * rate
+        const surcharge = surchargeFor(term.type, attemptType, section.offeredCourse.credits, rate)
         const enrollment = await tx.enrollment.create({
           data: {
             formId: form.id,
@@ -549,6 +568,15 @@ export class RegistrationService {
             creditRate: rate,
             surcharge,
           },
+        })
+        await this.tuition.postSurcharge(tx, {
+          enrollmentId: enrollment.id,
+          studentId: context.student.id,
+          termId: term.id,
+          courseCode: course.code,
+          attemptType,
+          surcharge,
+          registeredAt: enrollment.registeredAt,
         })
         return {
           sectionId,
