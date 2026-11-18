@@ -303,7 +303,7 @@ model RegistrationSlotCohort {
 }
 
 /// BM4: a course opened in a term. ADR-0017/TKB-05: credits belong to the offering, are taken from the
-/// TKB TỐ TC column (default = course credits when blank) and may be zero.
+/// TKB SỐ TC column (default = course credits when blank) and may be zero.
 model OfferedCourse {
   id       Int             @id @default(autoincrement())
   termId   Int             @map("term_id")

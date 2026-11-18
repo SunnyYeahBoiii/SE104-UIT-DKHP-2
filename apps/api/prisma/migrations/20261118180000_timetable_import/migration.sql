@@ -10,6 +10,8 @@ CREATE UNIQUE INDEX "room_code_key" ON "room"("code");
 
 -- ADR-0017 / TKB-05: credits belong to the offering in a term and may be zero.
 ALTER TABLE "offered_course" ADD COLUMN "credits" INTEGER NOT NULL DEFAULT 0;
+-- The default only backfills existing rows; the import always sets credits explicitly.
+ALTER TABLE "offered_course" ALTER COLUMN "credits" DROP DEFAULT;
 
 -- TKB-07: cohort reserved for a section is display/filter only, stored as an admission year.
 ALTER TABLE "course_section"
