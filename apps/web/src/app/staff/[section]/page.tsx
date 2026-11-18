@@ -1,4 +1,5 @@
 import { AcademicCatalog } from '@/components/academic-catalog'
+import { BankTransactionsPage } from '@/components/finance/bank-transactions-page'
 import { Bm7Page } from '@/components/finance/bm7-page'
 import { DebtPage } from '@/components/finance/debt-page'
 import { ReceiptsPage } from '@/components/finance/receipts-page'
@@ -30,6 +31,7 @@ export default async function StaffSectionPage({
 }) {
   const { section } = await params
   if (section === 'counter') return <CounterPage />
+  if (section === 'bank') return <BankTransactionsPage />
   if (section === 'groups') return <AcademicCatalog />
   if (section === 'sections') return <TimetablePage />
   if (section === 'registration') return <RegistrationMonitor />
