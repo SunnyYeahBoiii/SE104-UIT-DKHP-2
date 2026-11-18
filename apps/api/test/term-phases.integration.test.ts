@@ -102,7 +102,7 @@ describe('term phase job (integration: Postgres dkhp_w43, moving fake clock)', (
     const sectionIdsLocal: number[] = []
     for (const course of [cs106, ss003]) {
       const offered = await prisma.offeredCourse.create({
-        data: { termId, courseId: course.id },
+        data: { termId, courseId: course.id, credits: course.credits },
       })
       offeredIdsLocal.push(offered.id)
       const section = await prisma.courseSection.create({
