@@ -25,7 +25,7 @@ services:
     ports:
       - '6379:6379'
   # ADR-0010: queue Redis, kept apart from cache/session Redis so eviction cannot drop a job.
-  # Database index 11 is reserved for the term-phase queue.
+  # Database index 11 is reserved for the term-phase queue; index 0 for the daily prerequisite review.
   redis-queue:
     image: redis:8-alpine
     command:
