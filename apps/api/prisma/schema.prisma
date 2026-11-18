@@ -111,6 +111,7 @@ model Student {
 
   priorityGroups    StudentPriorityGroup[]
   registrationForms RegistrationForm[]
+  creditWarnings    CreditWarning[]
   ledgerEntries     LedgerEntry[]
   receipts          Receipt[]
   bankTransactions  BankTransaction[]
@@ -269,6 +270,7 @@ model Term {
   registrationSlots RegistrationSlot[]
   offeredCourses    OfferedCourse[]
   registrationForms RegistrationForm[]
+  creditWarnings    CreditWarning[]
   ledgerEntries     LedgerEntry[]
   receipts          Receipt[]
   bankTransactions  BankTransaction[]
@@ -444,6 +446,23 @@ model Enrollment {
   @@index([sectionId])
   @@index([courseId])
   @@map("enrollment")
+}
+
+/// DK-08: a form below minCredits is marked at finalization for the academic office report. Warning only:
+/// the form still finalizes. The unique key makes re-running the phase job a no-op.
+model CreditWarning {
+  id         Int      @id @default(autoincrement())
+  studentId  Int      @map("student_id")
+  termId     Int      @map("term_id")
+  credits    Int
+  minCredits Int      @map("min_credits")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  student Student @relation(fields: [studentId], references: [id])
+  term    Term    @relation(fields: [termId], references: [id])
+
+  @@unique([studentId, termId])
+  @@map("credit_warning")
 }
 
 /// KQ-01 / ADR-0018: a past attempt imported from the university's grading system. Read-only reference data.

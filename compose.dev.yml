@@ -24,6 +24,20 @@ services:
     command: ['redis-server', '--appendonly', 'no']
     ports:
       - '6379:6379'
+  # ADR-0010: queue Redis, kept apart from cache/session Redis so eviction cannot drop a job.
+  # Database index 11 is reserved for the term-phase queue.
+  redis-queue:
+    image: redis:8-alpine
+    command:
+      - redis-server
+      - --appendonly
+      - 'yes'
+      - --appendfsync
+      - everysec
+      - --maxmemory-policy
+      - noeviction
+    ports:
+      - '6380:6379'
 
 volumes:
   postgres-data:

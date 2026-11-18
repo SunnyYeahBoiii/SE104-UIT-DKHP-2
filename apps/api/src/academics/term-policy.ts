@@ -13,7 +13,7 @@ export const MILESTONE_FIELDS = [
 
 export type MilestoneField = (typeof MILESTONE_FIELDS)[number]
 export type MilestoneValues = Record<MilestoneField, Date>
-export type TermPhase = 'PREPARATION' | 'REGISTRATION' | 'ADJUSTMENT' | 'IN_PROGRESS'
+export type TermPhase = 'PREPARATION' | 'REGISTRATION' | 'ADJUSTMENT' | 'IN_PROGRESS' | 'CLOSED'
 
 export type PolicyIssue = {
   code: string
@@ -181,6 +181,17 @@ export function validateSlotsInsideRegistration(
 }
 
 export type SlotState = 'UPCOMING' | 'ONGOING' | 'PAST'
+
+/**
+ * HK-03: one forward step at a time. Walking (instead of jumping to `termPhase`) keeps per-phase hooks
+ * in order when the job first runs after several milestones have already passed. Never goes backwards.
+ */
+export function nextTermPhase(current: TermPhase, m: MilestoneValues, now: Date): TermPhase | null {
+  if (current === 'PREPARATION' && !before(now, m.registrationStartAt)) return 'REGISTRATION'
+  if (current === 'REGISTRATION' && !before(now, m.adjustmentStartAt)) return 'ADJUSTMENT'
+  if (current === 'ADJUSTMENT' && !before(now, m.adjustmentEndAt)) return 'IN_PROGRESS'
+  return null
+}
 
 export function slotState(slot: Interval, now: Date): SlotState {
   if (!before(now, slot.startAt)) return before(now, slot.endAt) ? 'ONGOING' : 'PAST'
