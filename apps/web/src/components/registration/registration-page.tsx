@@ -10,6 +10,9 @@ import {
   DAY_LABELS,
   PHASE_LABELS,
   formatCountdown,
+  isPracticeGroup,
+  PRACTICE_MODE_LABELS,
+  retakeSplitHint,
   sectionDays,
   type FormRow,
   type RegistrationOverview,
@@ -133,11 +136,16 @@ export function RegistrationPage() {
     setCancelling(true)
     setNotice(null)
     try {
-      await api(`/registration/enrollments/${cancelTarget.id}/cancel`, {
-        method: 'POST',
-        headers: { 'Idempotency-Key': crypto.randomUUID() },
-      })
-      setNotice(`Đã huỷ lớp ${cancelTarget.sectionCode}. Chỗ đã được trả ngay.`)
+      const response = await api<{ cancelledEnrollments: { sectionCode: string }[] }>(
+        `/registration/enrollments/${cancelTarget.id}/cancel`,
+        {
+          method: 'POST',
+          headers: { 'Idempotency-Key': crypto.randomUUID() },
+        },
+      )
+      setNotice(
+        `Đã huỷ ${response.cancelledEnrollments.length} dòng, gồm ${cancelTarget.sectionCode}. Chỗ đã được trả ngay.`,
+      )
       setCancelTarget(null)
       refresh()
     } catch (error) {
@@ -156,6 +164,7 @@ export function RegistrationPage() {
     )
 
   const full = (section: (typeof data.sections)[number]) => section.remaining === 0
+  const retakeHint = retakeSplitHint(data.sections)
 
   return (
     <div className="space-y-5 pb-32">
@@ -193,6 +202,7 @@ export function RegistrationPage() {
       </Banner>
 
       {notice ? <Banner tone="info">{notice}</Banner> : null}
+      {retakeHint ? <Banner tone="info">{retakeHint}</Banner> : null}
 
       {results && results.length > 0 ? (
         <Card>
@@ -224,6 +234,9 @@ export function RegistrationPage() {
 
       <Card>
         <h2 className="text-lg font-semibold text-ink">Môn mở trong kỳ</h2>
+        <p className="mt-1 text-xs text-muted">
+          Lớp LT và nhóm thực hành là hai dòng riêng. Huỷ một trong hai thì huỷ luôn cái kia.
+        </p>
         <div className="mt-3 grid gap-3">
           <div className="relative">
             <Search size={18} className="absolute top-3.5 left-3 text-muted" />
@@ -301,6 +314,11 @@ export function RegistrationPage() {
         ) : (
           <ul className="mt-4 space-y-3">
             {data.sections.map((section) => {
+              const group = isPracticeGroup(section)
+              const parent = group
+                ? data.sections.find((item) => item.id === section.parentSectionId)
+                : undefined
+              const mode = parent?.practiceMode ?? section.practiceMode
               const chosen = selected.includes(section.id)
               const disabled = !canWrite || full(section) || section.registered
               const percent = section.capacity
@@ -310,7 +328,7 @@ export function RegistrationPage() {
                 <li
                   key={section.id}
                   data-testid={`section-${section.code}`}
-                  className={`rounded-md border p-4 ${chosen ? 'border-brand-500 bg-brand-50' : 'border-line bg-surface'}`}
+                  className={`rounded-md border p-4 ${group ? 'ml-2 border-l-2 border-brand-200' : ''} ${chosen ? 'border-brand-500 bg-brand-50' : 'border-line bg-surface'}`}
                 >
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
@@ -319,6 +337,12 @@ export function RegistrationPage() {
                         <span className="text-muted"> · {section.code}</span>
                       </p>
                       <p className="text-sm font-medium text-ink">{section.courseName}</p>
+                      {group || mode ? (
+                        <p className="mt-1 text-xs font-medium text-brand-700">
+                          {group ? 'Nhóm thực hành · ' : 'Có nhóm thực hành · '}
+                          {PRACTICE_MODE_LABELS[mode ?? ''] ?? 'Theo lịch'}
+                        </p>
+                      ) : null}
                     </div>
                     <span className="tabular rounded-sm bg-neutral-50 px-2 py-1 text-xs text-muted">
                       {section.credits} TC · {ATTEMPT_LABELS[section.attemptType]}
@@ -458,8 +482,8 @@ export function RegistrationPage() {
           >
             <h2 className="text-lg font-semibold text-ink">Huỷ lớp {cancelTarget.sectionCode}?</h2>
             <p className="mt-2 text-sm text-muted">
-              Chỗ được trả ngay. Huỷ lớp LT thì huỷ luôn nhóm thực hành con; muốn sang lớp khác bạn
-              phải đăng ký lại.
+              Huỷ lớp LT thì huỷ luôn nhóm thực hành con; huỷ nhóm thực hành thì huỷ luôn lớp LT
+              cha. Chỗ của cả hai được trả ngay; muốn sang lớp khác bạn phải đăng ký lại.
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <Button variant="ghost" onClick={() => setCancelTarget(null)}>

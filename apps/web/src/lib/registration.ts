@@ -85,6 +85,28 @@ export const ATTEMPT_LABELS: Record<AttemptType, string> = {
   IMPROVEMENT: 'Cải thiện',
 }
 
+export const PRACTICE_MODE_LABELS: Record<string, string> = {
+  SCHEDULED: 'HT1 · Theo lịch',
+  SELF_SCHEDULED: 'HT2 · Tự xếp lịch',
+}
+
+export function isPracticeGroup(section: Section): boolean {
+  return section.parentSectionId !== null
+}
+
+export function retakeSplitHint(sections: Section[]): string | null {
+  if (sections.some((section) => isPracticeGroup(section) && section.attemptType === 'IMPROVEMENT'))
+    return 'Bạn đã Đạt phần thực hành: đăng ký lớp LT như môn không có thực hành.'
+  if (
+    sections.some(
+      (section) =>
+        !isPracticeGroup(section) && section.practiceMode && section.attemptType === 'IMPROVEMENT',
+    )
+  )
+    return 'Bạn đã Đạt phần lý thuyết: có thể chọn nhóm thực hành của bất kỳ lớp LT nào.'
+  return null
+}
+
 export const DAY_LABELS: Record<number, string> = {
   2: 'T2',
   3: 'T3',
