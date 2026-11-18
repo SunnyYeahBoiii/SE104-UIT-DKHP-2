@@ -1,4 +1,4 @@
-// Database schema for the course-registration and tuition system.
+// Database schema for the course-registration and tuition system (ADR-0019 scope).
 //
 // Conventions:
 // - Model and field names follow the CONTEXT.md glossary in English (ADR-0014); tables and columns are
@@ -20,12 +20,11 @@ datasource db {
 
 // ───────────────────────────── Accounts ─────────────────────────────
 
+/// ADR-0018/0019: only these three roles remain; lecturers are catalog data, not accounts.
 enum Role {
   STUDENT
-  LECTURER
   ACADEMIC_OFFICE
   FINANCE_OFFICE
-  ADMIN
 }
 
 /// A login. Sessions live in Redis (ADR-0013), so there is no session table.
@@ -36,7 +35,7 @@ model User {
   passwordHash       String    @map("password_hash")
   fullName           String    @map("full_name")
   email              String?   @unique
-  /// One account may hold several roles, e.g. a lecturer who also works in the academic office.
+  /// One account may hold several roles, e.g. a finance officer who also works in the academic office.
   roles              Role[]
   mustChangePassword Boolean   @default(true) @map("must_change_password")
   isActive           Boolean   @default(true) @map("is_active")
@@ -44,85 +43,38 @@ model User {
   createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  student  Student?
-  lecturer Lecturer?
-
-  notifications Notification[]
-  auditLogs     AuditLog[]
-
-  statusDecisions      StudentStatusDecision[]
-  leaveDecisions       LeaveDecision[]
-  submittedGradebooks  Gradebook[]             @relation("GradebookSubmittedBy")
-  lockedGradebooks     Gradebook[]             @relation("GradebookLockedBy")
-  gradeAmendments      GradeAmendment[]
-  liftedExamBans       ExamBan[]
+  student              Student?
   ledgerEntries        LedgerEntry[]
-  adjustments          Adjustment[]
   collectedReceipts    Receipt[]
   assignedTransactions BankTransaction[]
   systemParameters     SystemParameter[]
+  auditLogs            AuditLog[]
 
   @@map("user_account")
 }
 
-// ─────────────────────────── Organisation ───────────────────────────
+// ─────────────────────── Reference data (HS-09) ───────────────────────
 
-model Province {
-  id        Int        @id @default(autoincrement())
-  code      String     @unique
-  name      String
-  districts District[]
+/// HS-09 / DK-19: a student, a class section and a fee schedule each belong to exactly one system.
+model TrainingSystem {
+  id             Int             @id @default(autoincrement())
+  code           String          @unique
+  name           String
+  students       Student[]
+  courseSections CourseSection[]
+  feeSchedules   FeeSchedule[]
 
-  @@map("province")
+  @@map("training_system")
 }
 
-/// HS-01: a hometown is a district of a province; each district carries a remote-area flag.
-model District {
-  id         Int       @id @default(autoincrement())
-  provinceId Int       @map("province_id")
-  code       String    @unique
-  name       String
-  isRemote   Boolean   @default(false) @map("is_remote")
-  province   Province  @relation(fields: [provinceId], references: [id])
-  students   Student[]
-
-  @@index([provinceId])
-  @@map("district")
-}
-
-model Faculty {
-  id        Int        @id @default(autoincrement())
-  code      String     @unique
-  name      String
-  majors    Major[]
-  lecturers Lecturer[]
-  courses   Course[]
-
-  @@map("faculty")
-}
-
-model Major {
-  id        Int          @id @default(autoincrement())
-  facultyId Int          @map("faculty_id")
-  code      String       @unique
-  name      String
-  faculty   Faculty      @relation(fields: [facultyId], references: [id])
-  students  Student[]
-  curricula Curriculum[]
-
-  @@index([facultyId])
-  @@map("major")
-}
-
-/// Admission cohort, e.g. K18 = students admitted in 2023. A student's cohort never changes (HS-04).
+/// Admission cohort, e.g. K19 = students admitted in 2024. A student's cohort never changes (HS-04).
 model Cohort {
   id            Int    @id @default(autoincrement())
   code          String @unique
   admissionYear Int    @unique @map("admission_year")
 
   students          Student[]
-  curricula         Curriculum[]
-  feeSchedule       FeeSchedule?
+  feeSchedules      FeeSchedule[]
   registrationSlots RegistrationSlotCohort[]
 
   @@map("cohort")
@@ -140,41 +92,31 @@ model PriorityGroup {
   @@map("priority_group")
 }
 
-enum Gender {
-  MALE
-  FEMALE
-}
-
-/// Student profile from BM1. Only the academic office edits it (QV-01).
+/// HS-11: minimal profile. Having a profile means the student is studying; there is no status field.
 model Student {
-  id                 Int      @id @default(autoincrement())
-  studentCode        String   @unique @map("student_code")
-  userId             Int      @unique @map("user_id")
-  fullName           String   @map("full_name")
-  dateOfBirth        DateTime @map("date_of_birth") @db.Date
-  gender             Gender
-  hometownDistrictId Int      @map("hometown_district_id")
-  majorId            Int      @map("major_id")
-  cohortId           Int      @map("cohort_id")
-  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id               Int      @id @default(autoincrement())
+  /// MSSV: immutable business identifier, also used as the login name and payment code.
+  studentCode      String   @unique @map("student_code")
+  userId           Int      @unique @map("user_id")
+  fullName         String   @map("full_name")
+  email            String?
+  cohortId         Int      @map("cohort_id")
+  trainingSystemId Int      @map("training_system_id")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  user             User     @relation(fields: [userId], references: [id])
-  hometownDistrict District @relation(fields: [hometownDistrictId], references: [id])
-  major            Major    @relation(fields: [majorId], references: [id])
-  cohort           Cohort   @relation(fields: [cohortId], references: [id])
+  user           User           @relation(fields: [userId], references: [id])
+  cohort         Cohort         @relation(fields: [cohortId], references: [id])
+  trainingSystem TrainingSystem @relation(fields: [trainingSystemId], references: [id])
 
   priorityGroups    StudentPriorityGroup[]
-  statusDecisions   StudentStatusDecision[]
-  leaveDecisions    LeaveDecision[]
   registrationForms RegistrationForm[]
-  examBans          ExamBan[]
   ledgerEntries     LedgerEntry[]
-  adjustments       Adjustment[]
   receipts          Receipt[]
   bankTransactions  BankTransaction[]
+  takenCourses      TakenCourse[]
 
-  @@index([cohortId, majorId])
+  @@index([cohortId, trainingSystemId])
   @@map("student")
 }
 
@@ -188,63 +130,17 @@ model StudentPriorityGroup {
   @@map("student_priority_group")
 }
 
-enum StudentStatus {
-  ACTIVE
-  ON_LEAVE
-  WITHDRAWN
-  GRADUATED
-}
-
-/// HS-06: status only changes through an academic-office decision. The status in a term is the latest
-/// decision whose effective term is not after it, overridden by a LeaveDecision for that term.
-model StudentStatusDecision {
-  id              Int           @id @default(autoincrement())
-  studentId       Int           @map("student_id")
-  status          StudentStatus
-  effectiveTermId Int           @map("effective_term_id")
-  reason          String
-  decidedById     Int?          @map("decided_by_id")
-  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
-
-  student       Student @relation(fields: [studentId], references: [id])
-  effectiveTerm Term    @relation(fields: [effectiveTermId], references: [id])
-  decidedBy     User?   @relation(fields: [decidedById], references: [id])
-
-  @@index([studentId, createdAt])
-  @@map("student_status_decision")
-}
-
-/// Leave of absence for one term. A multi-term leave is one row per term.
-model LeaveDecision {
-  id          Int      @id @default(autoincrement())
-  studentId   Int      @map("student_id")
-  termId      Int      @map("term_id")
-  reason      String
-  decidedById Int?     @map("decided_by_id")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-
-  student   Student @relation(fields: [studentId], references: [id])
-  term      Term    @relation(fields: [termId], references: [id])
-  decidedBy User?   @relation(fields: [decidedById], references: [id])
-
-  @@unique([studentId, termId])
-  @@map("leave_decision")
-}
-
+/// ADR-0018: a lecturer is a code + name shown on a class section, with no account and no role.
 model Lecturer {
   id           Int             @id @default(autoincrement())
   lecturerCode String          @unique @map("lecturer_code")
-  userId       Int             @unique @map("user_id")
   fullName     String          @map("full_name")
-  facultyId    Int             @map("faculty_id")
-  user         User            @relation(fields: [userId], references: [id])
-  faculty      Faculty         @relation(fields: [facultyId], references: [id])
   sections     CourseSection[]
 
   @@map("lecturer")
 }
 
-// ────────────────────────── Courses & curriculum ──────────────────────────
+// ────────────────────────── Courses ──────────────────────────
 
 enum CourseType {
   THEORY
@@ -253,8 +149,8 @@ enum CourseType {
 
 /// DT-01/DT-02: one type per course; credits = totalPeriods / 15 (THEORY) or / 30 (PRACTICE).
 /// A course with both parts is two courses (ADR-0002): every PRACTICE course points at exactly one companion
-/// THEORY course (CHECK), and a THEORY course has at most one PRACTICE course (unique). The PRACTICE code is
-/// the THEORY code plus `TH`, e.g. IT004 / IT004TH.
+/// THEORY course (CHECK), and a THEORY course has at most one PRACTICE course (unique). A standalone
+/// PRACTICE course (e.g. CE119) has no companion and no suffix.
 model Course {
   id                      Int        @id @default(autoincrement())
   code                    String     @unique
@@ -262,28 +158,26 @@ model Course {
   type                    CourseType
   totalPeriods            Int        @map("total_periods")
   credits                 Int
-  facultyId               Int?       @map("faculty_id")
   companionTheoryCourseId Int?       @unique @map("companion_theory_course_id")
   equivalenceId           Int?       @map("equivalence_id")
   createdAt               DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt               DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  faculty               Faculty?           @relation(fields: [facultyId], references: [id])
   companionTheoryCourse Course?            @relation("CompanionTheory", fields: [companionTheoryCourseId], references: [id])
   practiceCourse        Course?            @relation("CompanionTheory")
   equivalence           CourseEquivalence? @relation(fields: [equivalenceId], references: [id])
 
-  prerequisites     Prerequisite[]     @relation("PrerequisiteOf")
-  requiredBy        Prerequisite[]     @relation("PrerequisiteFor")
-  curriculumCourses CurriculumCourse[]
-  offerings         OfferedCourse[]
-  enrollments       Enrollment[]
+  prerequisites  Prerequisite[]  @relation("PrerequisiteOf")
+  requiredBy     Prerequisite[]  @relation("PrerequisiteFor")
+  offeredCourses OfferedCourse[]
+  enrollments    Enrollment[]
+  takenCourses   TakenCourse[]
 
   @@index([equivalenceId])
   @@map("course")
 }
 
-/// DT-04: courses in one group count as a single course for attempt type, prerequisites and credits.
+/// DT-04: courses in one group count as a single course for attempt type and prerequisites (KQ-04).
 model CourseEquivalence {
   id      Int      @id @default(autoincrement())
   name    String
@@ -312,60 +206,11 @@ model Prerequisite {
   @@map("prerequisite")
 }
 
-/// BM3 / DT-03: the study plan of one (major, cohort).
-model Curriculum {
-  id              Int              @id @default(autoincrement())
-  majorId         Int              @map("major_id")
-  cohortId        Int              @map("cohort_id")
-  minTotalCredits Int              @map("min_total_credits")
-  major           Major            @relation(fields: [majorId], references: [id])
-  cohort          Cohort           @relation(fields: [cohortId], references: [id])
-  knowledgeBlocks KnowledgeBlock[]
-
-  @@unique([majorId, cohortId])
-  @@map("curriculum")
-}
-
-enum KnowledgeBlockType {
-  /// Every course in the block must be passed.
-  REQUIRED
-  /// At least `minCredits` must be passed from the block's courses.
-  ELECTIVE
-}
-
-model KnowledgeBlock {
-  id           Int                @id @default(autoincrement())
-  curriculumId Int                @map("curriculum_id")
-  name         String
-  type         KnowledgeBlockType
-  /// Required for ELECTIVE blocks; null for REQUIRED blocks.
-  minCredits   Int?               @map("min_credits")
-  sortOrder    Int                @default(0) @map("sort_order")
-  curriculum   Curriculum         @relation(fields: [curriculumId], references: [id], onDelete: Cascade)
-  courses      CurriculumCourse[]
-
-  @@index([curriculumId])
-  @@map("knowledge_block")
-}
-
-model CurriculumCourse {
-  knowledgeBlockId Int            @map("knowledge_block_id")
-  courseId         Int            @map("course_id")
-  /// 1-based term within the programme. Advisory only (DT-07).
-  suggestedTerm    Int            @map("suggested_term")
-  knowledgeBlock   KnowledgeBlock @relation(fields: [knowledgeBlockId], references: [id], onDelete: Cascade)
-  course           Course         @relation(fields: [courseId], references: [id])
-
-  @@id([knowledgeBlockId, courseId])
-  @@index([courseId])
-  @@map("curriculum_course")
-}
-
 // ─────────────────────────── Terms & sections ───────────────────────────
 
 model AcademicYear {
   id        Int    @id @default(autoincrement())
-  /// 2025 for the 2025-2026 academic year.
+  /// 2026 for the 2026-2027 academic year.
   startYear Int    @unique @map("start_year")
   terms     Term[]
 
@@ -394,7 +239,7 @@ model Term {
   id                  Int       @id @default(autoincrement())
   academicYearId      Int       @map("academic_year_id")
   type                TermType
-  /// HK-01: start year of the academic year + 1/2/3, e.g. "20251".
+  /// HK-01: start year of the academic year + 1/2/3, e.g. "20261".
   termCode            String    @unique @map("term_code")
   phase               TermPhase @default(PREPARATION)
   /// Monday of week 1; Meeting.weeks counts from here.
@@ -415,13 +260,10 @@ model Term {
   registrationSlots RegistrationSlot[]
   offeredCourses    OfferedCourse[]
   registrationForms RegistrationForm[]
-  statusDecisions   StudentStatusDecision[]
-  leaveDecisions    LeaveDecision[]
-  examBans          ExamBan[]
   ledgerEntries     LedgerEntry[]
-  adjustments       Adjustment[]
   receipts          Receipt[]
   bankTransactions  BankTransaction[]
+  takenCourses      TakenCourse[]
 
   @@unique([academicYearId, type])
   @@map("term")
@@ -473,33 +315,38 @@ enum PracticeMode {
 }
 
 /// The unit students register for, e.g. SE104.P21. A PracticeSection (SE104.P21.1) belongs to a PRACTICE
-/// course offering and points at its parent section of the companion THEORY course (ADR-0002); a parent has
-/// at most two, coded `.1` and `.2`. Only the parent carries `practiceMode`.
+/// course offering and points at its parent section of the companion THEORY course (ADR-0002). A parent has
+/// at most two, coded `.1` and `.2`. Only the parent carries `practiceMode`. DK-19: a section belongs to a
+/// training system, checked against the student's system at registration time only.
 /// `enrolledCount` is only changed by the conditional UPDATE in ADR-0005 and guarded by a CHECK.
 model CourseSection {
-  id              Int           @id @default(autoincrement())
-  offeredCourseId Int           @map("offered_course_id")
-  code            String
-  lecturerId      Int?          @map("lecturer_id")
-  capacity        Int
-  enrolledCount   Int           @default(0) @map("enrolled_count")
-  parentSectionId Int?          @map("parent_section_id")
-  practiceMode    PracticeMode? @map("practice_mode")
-  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt       DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id               Int           @id @default(autoincrement())
+  offeredCourseId  Int           @map("offered_course_id")
+  trainingSystemId Int           @map("training_system_id")
+  code             String
+  lecturerId       Int?          @map("lecturer_id")
+  /// Display-only language of instruction, e.g. "EN" for SE104.P23.
+  language         String?
+  capacity         Int
+  enrolledCount    Int           @default(0) @map("enrolled_count")
+  parentSectionId  Int?          @map("parent_section_id")
+  practiceMode     PracticeMode? @map("practice_mode")
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   offeredCourse    OfferedCourse   @relation(fields: [offeredCourseId], references: [id])
+  trainingSystem   TrainingSystem  @relation(fields: [trainingSystemId], references: [id])
   lecturer         Lecturer?       @relation(fields: [lecturerId], references: [id])
   parentSection    CourseSection?  @relation("PracticeSections", fields: [parentSectionId], references: [id])
   practiceSections CourseSection[] @relation("PracticeSections")
 
   meetings    Meeting[]
   enrollments Enrollment[]
-  gradebook   Gradebook?
 
   @@unique([offeredCourseId, code])
   @@index([parentSectionId])
   @@index([lecturerId])
+  @@index([trainingSystemId])
   @@map("course_section")
 }
 
@@ -519,7 +366,7 @@ model Meeting {
   @@map("meeting")
 }
 
-// ────────────────────────── Registration & grades ──────────────────────────
+// ────────────────────────── Registration & results ──────────────────────────
 
 /// BM5 / DK-01: at most one form per (student, term). Its row is the per-student lock in ADR-0005.
 model RegistrationForm {
@@ -544,11 +391,11 @@ enum EnrollmentStatus {
   FINALIZED
 }
 
+/// ADR-0019/DK-16: only three attempt types; there is no free elective.
 enum AttemptType {
   FIRST
   RETAKE
   IMPROVEMENT
-  FREE_ELECTIVE
 }
 
 /// One seat in one section. `courseId` duplicates section → offered course → course so the partial unique
@@ -566,7 +413,7 @@ model Enrollment {
   creditRate          BigInt           @map("credit_rate")
   /// credits × creditRate when HP-03 applies, else 0.
   surcharge           BigInt           @default(0)
-  /// Weighted course score, written when the gradebook is locked (KQ-02).
+  /// KQ-01/ADR-0018: read-only score of the attempt, imported from the university's grading system.
   courseScore         Decimal?         @map("course_score") @db.Decimal(3, 1)
   registeredAt        DateTime         @default(now()) @map("registered_at") @db.Timestamptz(3)
   cancelledAt         DateTime?        @map("cancelled_at") @db.Timestamptz(3)
@@ -576,9 +423,7 @@ model Enrollment {
   section CourseSection    @relation(fields: [sectionId], references: [id])
   course  Course           @relation(fields: [courseId], references: [id])
 
-  componentScores ComponentScore[]
-  gradeAmendments GradeAmendment[]
-  ledgerEntries   LedgerEntry[]
+  ledgerEntries LedgerEntry[]
 
   @@unique([formId, courseId], map: "enrollment_active_course_key", where: raw("status <> 'CANCELLED'"))
   @@index([formId])
@@ -587,110 +432,43 @@ model Enrollment {
   @@map("enrollment")
 }
 
-enum GradebookStatus {
-  DRAFT
-  SUBMITTED
-  LOCKED
-}
+/// KQ-01 / ADR-0018: a past attempt imported from the university's grading system. Read-only reference data.
+/// Together with finalized enrollments it is enough to compute the effective result (KQ-04).
+model TakenCourse {
+  id          Int      @id @default(autoincrement())
+  studentId   Int      @map("student_id")
+  courseId    Int      @map("course_id")
+  termId      Int      @map("term_id")
+  /// Null when this attempt has no result yet (KQ-03).
+  courseScore Decimal? @map("course_score") @db.Decimal(3, 1)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
-/// KQ-05: DRAFT → SUBMITTED (lecturer) → LOCKED (academic office).
-model Gradebook {
-  id            Int             @id @default(autoincrement())
-  sectionId     Int             @unique @map("section_id")
-  status        GradebookStatus @default(DRAFT)
-  submittedAt   DateTime?       @map("submitted_at") @db.Timestamptz(3)
-  submittedById Int?            @map("submitted_by_id")
-  lockedAt      DateTime?       @map("locked_at") @db.Timestamptz(3)
-  lockedById    Int?            @map("locked_by_id")
+  student Student @relation(fields: [studentId], references: [id])
+  course  Course  @relation(fields: [courseId], references: [id])
+  term    Term    @relation(fields: [termId], references: [id])
 
-  section     CourseSection    @relation(fields: [sectionId], references: [id])
-  submittedBy User?            @relation("GradebookSubmittedBy", fields: [submittedById], references: [id])
-  lockedBy    User?            @relation("GradebookLockedBy", fields: [lockedById], references: [id])
-  components  GradeComponent[]
-
-  @@map("gradebook")
-}
-
-/// KQ-01: weights (percent) of a gradebook sum to 100 and exactly one component is the final exam.
-model GradeComponent {
-  id          Int       @id @default(autoincrement())
-  gradebookId Int       @map("gradebook_id")
-  name        String
-  weight      Int
-  isFinal     Boolean   @default(false) @map("is_final")
-  sortOrder   Int       @default(0) @map("sort_order")
-  gradebook   Gradebook @relation(fields: [gradebookId], references: [id], onDelete: Cascade)
-
-  scores     ComponentScore[]
-  amendments GradeAmendment[]
-
-  @@unique([gradebookId, name])
-  @@unique([gradebookId], map: "grade_component_one_final_key", where: raw("is_final"))
-  @@map("grade_component")
-}
-
-model ComponentScore {
-  enrollmentId Int            @map("enrollment_id")
-  componentId  Int            @map("component_id")
-  score        Decimal        @db.Decimal(3, 1)
-  updatedAt    DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
-  enrollment   Enrollment     @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
-  component    GradeComponent @relation(fields: [componentId], references: [id], onDelete: Cascade)
-
-  @@id([enrollmentId, componentId])
-  @@index([componentId])
-  @@map("component_score")
-}
-
-/// KQ-06: every score change after LOCKED, with its reason. Append-only.
-model GradeAmendment {
-  id           Int            @id @default(autoincrement())
-  enrollmentId Int            @map("enrollment_id")
-  componentId  Int            @map("component_id")
-  oldScore     Decimal        @map("old_score") @db.Decimal(3, 1)
-  newScore     Decimal        @map("new_score") @db.Decimal(3, 1)
-  reason       String
-  amendedById  Int            @map("amended_by_id")
-  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
-  enrollment   Enrollment     @relation(fields: [enrollmentId], references: [id])
-  component    GradeComponent @relation(fields: [componentId], references: [id])
-  amendedBy    User           @relation(fields: [amendedById], references: [id])
-
-  @@index([enrollmentId])
-  @@map("grade_amendment")
-}
-
-/// CT-01..CT-04: a ban covers every section of the term. Lifting requires a reason.
-model ExamBan {
-  id                Int       @id @default(autoincrement())
-  studentId         Int       @map("student_id")
-  termId            Int       @map("term_id")
-  /// Outstanding amount at the time the ban job ran, for the record.
-  outstandingAmount BigInt    @map("outstanding_amount")
-  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
-  liftedAt          DateTime? @map("lifted_at") @db.Timestamptz(3)
-  liftedById        Int?      @map("lifted_by_id")
-  liftReason        String?   @map("lift_reason")
-  student           Student   @relation(fields: [studentId], references: [id])
-  term              Term      @relation(fields: [termId], references: [id])
-  liftedBy          User?     @relation(fields: [liftedById], references: [id])
-
-  @@unique([studentId, termId])
-  @@map("exam_ban")
+  @@unique([studentId, termId, courseId])
+  @@index([studentId, courseId])
+  @@map("taken_course")
 }
 
 // ────────────────────────────── Tuition ──────────────────────────────
 
-/// HP-01: one fee schedule per cohort. Rates are copied onto enrollments, so edits are not retroactive.
+/// HP-01: one fee schedule per (cohort, training system). Rates are copied onto enrollments, so edits are
+/// not retroactive. The default rates and the receiving account live in SystemParameter.
 model FeeSchedule {
   id                 Int      @id @default(autoincrement())
-  cohortId           Int      @unique @map("cohort_id")
+  cohortId           Int      @map("cohort_id")
+  trainingSystemId   Int      @map("training_system_id")
   baseTuition        BigInt   @map("base_tuition")
   theoryCreditRate   BigInt   @default(27000) @map("theory_credit_rate")
   practiceCreditRate BigInt   @default(37000) @map("practice_credit_rate")
   updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
-  cohort             Cohort   @relation(fields: [cohortId], references: [id])
 
+  cohort         Cohort         @relation(fields: [cohortId], references: [id])
+  trainingSystem TrainingSystem @relation(fields: [trainingSystemId], references: [id])
+
+  @@unique([cohortId, trainingSystemId])
   @@map("fee_schedule")
 }
 
@@ -699,20 +477,21 @@ enum LedgerDirection {
   CREDIT
 }
 
+/// HP-13/ADR-0019: no ADJUSTMENT and no REFUND; corrections are reversals, a missing fee schedule is a
+/// warning, and overpayment becomes a credit balance carried to the next term.
 enum LedgerEntryType {
   BASE_TUITION
+  BASE_TUITION_REVERSAL
   SURCHARGE
   SURCHARGE_REVERSAL
   DISCOUNT
   DISCOUNT_REVERSAL
   PAYMENT
-  ADJUSTMENT
-  REFUND
   BALANCE_CARRY_OUT
   BALANCE_CARRY_IN
 }
 
-/// ADR-0004: append-only. No UPDATE, no DELETE; corrections are reversal or adjustment entries.
+/// ADR-0004: append-only. No UPDATE, no DELETE; corrections are reversal entries.
 /// Amounts are always positive; `direction` gives the sign. BM7 figures are sums over these rows.
 model LedgerEntry {
   id             Int             @id @default(autoincrement())
@@ -726,7 +505,6 @@ model LedgerEntry {
   description    String?
   enrollmentId   Int?            @map("enrollment_id")
   receiptId      Int?            @map("receipt_id")
-  adjustmentId   Int?            @map("adjustment_id")
   /// The entry this one reverses or discounts, e.g. a DISCOUNT points at its BASE_TUITION debit.
   relatedEntryId Int?            @map("related_entry_id")
   /// Null when the system posted the entry.
@@ -737,7 +515,6 @@ model LedgerEntry {
   term         Term          @relation(fields: [termId], references: [id])
   enrollment   Enrollment?   @relation(fields: [enrollmentId], references: [id])
   receipt      Receipt?      @relation(fields: [receiptId], references: [id])
-  adjustment   Adjustment?   @relation(fields: [adjustmentId], references: [id])
   relatedEntry LedgerEntry?  @relation("RelatedEntry", fields: [relatedEntryId], references: [id])
   relatedFrom  LedgerEntry[] @relation("RelatedEntry")
   createdBy    User?         @relation(fields: [createdById], references: [id])
@@ -747,23 +524,6 @@ model LedgerEntry {
   @@index([enrollmentId])
   @@index([relatedEntryId])
   @@map("ledger_entry")
-}
-
-/// A correction to a student's ledger for a term, always with a reason (HP-07, HS-07).
-model Adjustment {
-  id            Int           @id @default(autoincrement())
-  studentId     Int           @map("student_id")
-  termId        Int           @map("term_id")
-  reason        String
-  createdById   Int?          @map("created_by_id")
-  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
-  student       Student       @relation(fields: [studentId], references: [id])
-  term          Term          @relation(fields: [termId], references: [id])
-  createdBy     User?         @relation(fields: [createdById], references: [id])
-  ledgerEntries LedgerEntry[]
-
-  @@index([studentId, termId])
-  @@map("adjustment")
 }
 
 // ────────────────────────────── Payments ──────────────────────────────
@@ -815,9 +575,9 @@ model BankTransaction {
   sepayId          BigInt                @unique @map("sepay_id")
   gateway          String
   accountNumber    String                @map("account_number")
-  /// Bank-side time; exam bans are decided on this, not on webhook arrival (CT-01).
+  /// Bank-side time; the payment is dated on this, not on webhook arrival.
   transactionDate  DateTime              @map("transaction_date") @db.Timestamptz(3)
-  /// Payment code SePay extracted from the transfer content, e.g. HP2352000120251.
+  /// Payment code SePay extracted from the transfer content, e.g. HP2452000120262.
   code             String?
   content          String
   referenceCode    String?               @map("reference_code")
@@ -856,22 +616,6 @@ model OutboxEvent {
   @@map("outbox")
 }
 
-/// NFR-11: in-app notifications.
-model Notification {
-  id        Int       @id @default(autoincrement())
-  userId    Int       @map("user_id")
-  type      String
-  title     String
-  body      String
-  data      Json?
-  readAt    DateTime? @map("read_at") @db.Timestamptz(3)
-  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, createdAt])
-  @@map("notification")
-}
-
 /// NFR-10: append-only audit trail written by the command interceptor (ADR-0008).
 model AuditLog {
   id         Int      @id @default(autoincrement())
@@ -890,8 +634,8 @@ model AuditLog {
   @@map("audit_log")
 }
 
-/// Tunable defaults from requirements §10, edited by admin or finance. Values are JSON so one table holds
-/// numbers, money and durations alike.
+/// Defaults from requirements §10, edited by finance. Values are JSON so one table holds numbers, money and
+/// durations alike. The default credit rates and the receiving account are parameters here.
 model SystemParameter {
   key         String   @id
   value       Json

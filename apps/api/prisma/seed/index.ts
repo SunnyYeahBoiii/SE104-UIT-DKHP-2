@@ -1,7 +1,8 @@
 /* eslint-disable no-console -- CLI script: stdout is its report */
 /**
- * Development seed. Wipes every table and rebuilds a deterministic dataset around "now": the open term's
- * registration window always contains the moment the seed runs. Run with `bun run db:seed`.
+ * Development seed. Wipes every table and rebuilds the deterministic dataset of design prompt §A.7:
+ * "now" is 06/01/2027, the open term is 20262, and every scenario has fixed dates. Run with
+ * `bun run db:seed`; running it twice yields the same rows (TRUNCATE, not incremental inserts).
  */
 import { seedAcademics } from './academics'
 import { seedCatalog } from './catalog'
@@ -9,13 +10,12 @@ import { createClient, type Db } from './lib'
 import { seedParameters } from './parameters'
 import { seedPeople } from './people'
 import { DEMO, DEV_PASSWORD } from './scenarios'
-import { seedStatuses } from './status'
 import { seedTerms } from './terms'
 import { seedTuition } from './tuition'
 
 /**
- * TRUNCATE rather than deleteMany: the append-only triggers on the ledger, audit log and grade amendments
- * reject row-level DELETE, and RESTART IDENTITY keeps ids stable between runs.
+ * TRUNCATE rather than deleteMany: the append-only triggers on the ledger and audit log reject row-level
+ * DELETE, and RESTART IDENTITY keeps ids stable between runs.
  */
 async function wipe(db: Db) {
   const tables = await db.$queryRaw<{ tablename: string }[]>`
@@ -32,23 +32,23 @@ async function main() {
   const db = createClient()
   const started = performance.now()
   try {
-    const now = new Date()
     await wipe(db)
     const catalog = await seedCatalog(db)
     const people = await seedPeople(db, catalog)
-    const terms = await seedTerms(db, catalog, now)
-    await seedStatuses(db, catalog, people, terms, now)
-    const enrollments = await seedAcademics(db, catalog, people, terms, now)
-    await seedTuition(db, catalog, people, terms, enrollments, now)
-    await seedParameters(db, people.staff.admin)
+    const terms = await seedTerms(db, catalog)
+    const enrollments = await seedAcademics(db, catalog, people, terms)
+    await seedTuition(db, catalog, people, terms, enrollments)
+    await seedParameters(db, people.finance)
 
     const counts = {
       users: await db.user.count(),
       students: await db.student.count(),
+      trainingSystems: await db.trainingSystem.count(),
       terms: await db.term.count(),
+      feeSchedules: await db.feeSchedule.count(),
       sections: await db.courseSection.count(),
       enrollments: await db.enrollment.count(),
-      componentScores: await db.componentScore.count(),
+      takenCourses: await db.takenCourse.count(),
       ledgerEntries: await db.ledgerEntry.count(),
       receipts: await db.receipt.count(),
       bankTransactions: await db.bankTransaction.count(),

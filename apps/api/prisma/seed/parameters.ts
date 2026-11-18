@@ -1,14 +1,14 @@
 import type { Prisma } from '../../src/generated/prisma/client'
 import type { Db } from './lib'
 
-/** Account that receives tuition transfers; SePay webhooks for any other account are rejected (TT-04). */
+/** Account that receives tuition transfers (A.7); SePay webhooks for any other account are rejected (TT-04). */
 export const BANK_ACCOUNT = {
   gateway: 'MBBank',
   accountNumber: '0000000000',
   accountName: 'TRUONG DAI HOC CONG NGHE THONG TIN',
 }
 
-/** Requirements §10 defaults. Terms and fee schedules copy their own values, so edits here are not retroactive. */
+/** Requirements §10 defaults. The receiving account and the default credit rates are parameters (HP-01). */
 const PARAMETERS: [key: string, value: Prisma.InputJsonValue, description: string][] = [
   ['registration.mainTerm.minCredits', 14, 'Tín chỉ tối thiểu mỗi học kỳ chính'],
   ['registration.mainTerm.maxCredits', 24, 'Tín chỉ tối đa mỗi học kỳ chính'],
@@ -24,7 +24,6 @@ const PARAMETERS: [key: string, value: Prisma.InputJsonValue, description: strin
     'Đơn giá tín chỉ thực hành mặc định cho bảng phí mới (đồng)',
   ],
   ['grading.passThreshold', 5, 'Ngưỡng Đạt của điểm học phần'],
-  ['examBan.jobDelayMinutes', 60, 'Độ trễ job cấm thi sau hạn đóng học phí'],
   ['registration.pollingIntervalSeconds', 5, 'Chu kỳ polling trang đăng ký'],
   ['registration.availabilityCacheTtlSeconds', 3, 'TTL cache danh sách lớp và chỗ còn'],
   ['registration.idempotencyTtlHours', 24, 'TTL khoá chống lặp'],

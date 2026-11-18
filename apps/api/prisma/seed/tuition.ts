@@ -1,68 +1,29 @@
 import {
   BankTransactionStatus,
-  EnrollmentStatus,
   LedgerDirection,
   LedgerEntryType,
   PaymentChannel,
-  TermType,
 } from '../../src/generated/prisma/enums'
-import { type EnrollmentRecord, studiesIn } from './academics'
+import type { EnrollmentRecord } from './academics'
 import type { Catalog } from './catalog'
-import { addDays, addHours, type Db, must, percentOf } from './lib'
+import { addHours, type Db, must, percentOf, vn } from './lib'
 import { BANK_ACCOUNT } from './parameters'
 import type { People, StudentInfo } from './people'
-import { DEMO } from './scenarios'
-import { ACTIVE_TERMS, OPEN_TERM, type TermInfo } from './terms'
+import { DEMO, DEMO_NOW } from './scenarios'
+import { IN_PROGRESS_TERM, OPEN_TERM, type TermInfo } from './terms'
 
-/** Amount the overpaid demo student sends on top of the 20252 balance (HP-11). */
+/** A.7 fee table. K20 · CLC is deliberately absent so the missing-schedule warning has a case. */
+const FEES: [cohort: string, system: string, base: bigint, theory: bigint, practice: bigint][] = [
+  ['K19', 'CQUI', 15_000_000n, 27_000n, 37_000n],
+  ['K19', 'CLC', 20_000_000n, 27_000n, 37_000n],
+  ['K18', 'CQUI', 14_500_000n, 27_000n, 37_000n],
+  ['K20', 'CQUI', 15_500_000n, 27_000n, 37_000n],
+]
+
 const OVERPAYMENT = 500_000n
 
-type Payment = { amount: bigint; channel: PaymentChannel; paidAt: Date }
-
-const money = (amount: bigint) => `${amount.toLocaleString('vi-VN')} đ`
-const termLabel = (code: string) => {
-  const year = Number(code.slice(0, 4))
-  return `${code.endsWith('3') ? 'HK hè' : `HK${code.slice(4)}`} ${year}–${year + 1}`
-}
-/** SePay sends bank-local time without an offset. */
+const feeKey = (cohort: string, system: string) => `${cohort}:${system}`
 const sepayTime = (moment: Date) => addHours(moment, 7).toISOString().slice(0, 19).replace('T', ' ')
-
-/**
- * Who pays what. The regular pattern: past terms are paid in full before the deadline, the in-progress term
- * is a mix of unpaid, partly paid at the counter and paid by transfer, the open term is not paid yet.
- */
-function paymentsFor(student: StudentInfo, term: TermInfo, due: bigint, now: Date): Payment[] {
-  if (due <= 0n || term.code === OPEN_TERM) return []
-  const channel = student.index % 2 === 0 ? PaymentChannel.BANK_TRANSFER : PaymentChannel.COUNTER
-  const onTime = addDays(term.tuitionDeadline, -(2 + (student.index % 12)))
-
-  if (term.code === '20252' && student.code === DEMO.examBanned) {
-    return [
-      {
-        amount: due,
-        channel: PaymentChannel.BANK_TRANSFER,
-        paidAt: addDays(term.tuitionDeadline, 10),
-      },
-    ]
-  }
-  if (term.code === '20252' && student.code === DEMO.overpaid) {
-    return [{ amount: due + OVERPAYMENT, channel: PaymentChannel.BANK_TRANSFER, paidAt: onTime }]
-  }
-  if (term.code !== '20261') return [{ amount: due, channel, paidAt: onTime }]
-
-  // In progress: the deadline may still be ahead, so nothing is dated after the seed runs.
-  const recently = addDays(now, -(1 + (student.index % 10)))
-  if (student.code === DEMO.overpaid)
-    return [{ amount: due, channel: PaymentChannel.BANK_TRANSFER, paidAt: recently }]
-  switch (student.index % 4) {
-    case 0:
-      return []
-    case 1:
-      return [{ amount: due / 2n, channel: PaymentChannel.COUNTER, paidAt: recently }]
-    default:
-      return [{ amount: due, channel: PaymentChannel.BANK_TRANSFER, paidAt: recently }]
-  }
-}
 
 export async function seedTuition(
   db: Db,
@@ -70,70 +31,126 @@ export async function seedTuition(
   people: People,
   terms: Map<string, TermInfo>,
   enrollments: EnrollmentRecord[],
-  now: Date,
 ) {
-  const finance = people.staff.financeOffice
-  let nextSepayId = 31_000_001n
-  const receiptSequence = new Map<string, number>()
+  const fees = new Map<string, { base: bigint; theory: bigint; practice: bigint }>()
+  for (const [cohort, system, base, theory, practice] of FEES) {
+    await db.feeSchedule.create({
+      data: {
+        cohortId: must(catalog.cohorts, cohort).id,
+        trainingSystemId: must(catalog.systems, system),
+        baseTuition: base,
+        theoryCreditRate: theory,
+        practiceCreditRate: practice,
+      },
+    })
+    fees.set(feeKey(cohort, system), { base, theory, practice })
+  }
+  const feeFor = (student: StudentInfo) => fees.get(feeKey(student.cohort, student.system))
 
-  /** A debit plus, when the student has a priority group, its discount (HP-06: rate frozen now, floored). */
+  type EntryOptions = {
+    discountRate?: number
+    description?: string
+    enrollmentId?: number
+    receiptId?: number
+    relatedEntryId?: number
+    createdAt?: Date
+    createdById?: number
+  }
+
+  async function post(
+    studentCode: string,
+    termCode: string,
+    type: LedgerEntryType,
+    direction: LedgerDirection,
+    amount: bigint,
+    options: EntryOptions = {},
+  ) {
+    return db.ledgerEntry.create({
+      data: {
+        studentId: must(people.students, studentCode).id,
+        termId: must(terms, termCode).id,
+        type,
+        direction,
+        amount,
+        discountRate: options.discountRate ?? null,
+        description: options.description ?? null,
+        enrollmentId: options.enrollmentId ?? null,
+        receiptId: options.receiptId ?? null,
+        relatedEntryId: options.relatedEntryId ?? null,
+        createdById: options.createdById ?? null,
+        createdAt: options.createdAt ?? new Date(),
+      },
+    })
+  }
+
+  /** A debit and, when applicable, its HP-06 discount; returns the net amount owed. */
   async function debit(
     student: StudentInfo,
-    term: TermInfo,
+    termCode: string,
     type: typeof LedgerEntryType.BASE_TUITION | typeof LedgerEntryType.SURCHARGE,
     amount: bigint,
     description: string,
-    createdAt: Date,
-    enrollmentId?: number,
+    options: EntryOptions = {},
   ) {
-    const base = { studentId: student.id, termId: term.id, enrollmentId, createdAt }
-    const entry = await db.ledgerEntry.create({
-      data: { ...base, type, direction: LedgerDirection.DEBIT, amount, description },
+    const entry = await post(student.code, termCode, type, LedgerDirection.DEBIT, amount, {
+      ...options,
+      description,
     })
-    const discount = percentOf(amount, student.discountRate)
-    const discountEntry =
-      discount > 0n
-        ? await db.ledgerEntry.create({
-            data: {
-              ...base,
-              type: LedgerEntryType.DISCOUNT,
-              direction: LedgerDirection.CREDIT,
-              amount: discount,
-              discountRate: student.discountRate,
-              relatedEntryId: entry.id,
-              description: `Giảm ${student.discountRate}% — ${description}`,
-            },
-          })
-        : undefined
-    return { entry, discountEntry, net: amount - discount }
+    let net = amount
+    if (student.discountRate > 0) {
+      const discount = percentOf(amount, student.discountRate)
+      if (discount > 0n) {
+        const credit = await post(
+          student.code,
+          termCode,
+          LedgerEntryType.DISCOUNT,
+          LedgerDirection.CREDIT,
+          discount,
+          {
+            ...options,
+            discountRate: student.discountRate,
+            relatedEntryId: entry.id,
+            description: `Giảm ${student.discountRate}% — ${description}`,
+          },
+        )
+        net -= credit.amount
+      }
+    }
+    return { entry, net }
   }
 
-  async function pay(student: StudentInfo, term: TermInfo, { amount, channel, paidAt }: Payment) {
-    const sequence = (receiptSequence.get(term.code) ?? 0) + 1
-    receiptSequence.set(term.code, sequence)
-    const receiptNumber = `PT-${term.code}-${String(sequence).padStart(5, '0')}`
+  const receiptSequence = new Map<string, number>()
+  async function pay(
+    studentCode: string,
+    termCode: string,
+    amount: bigint,
+    channel: PaymentChannel,
+    paidAt: Date,
+  ) {
+    const term = must(terms, termCode)
+    const student = must(people.students, studentCode)
+    const sequence = (receiptSequence.get(termCode) ?? (termCode === OPEN_TERM ? 11 : 1)) + 1
+    receiptSequence.set(termCode, sequence)
+    const receiptNumber = `PT-${termCode}-${String(sequence).padStart(5, '0')}`
 
-    let bankTransactionId: number | undefined
+    let bankTransactionId: number | null = null
     if (channel === PaymentChannel.BANK_TRANSFER) {
-      const sepayId = nextSepayId++
-      const code = `HP${student.code}${term.code}` // TT-02
+      const code = `HP${studentCode}${termCode}` // TT-02
       const content = `${code} nop hoc phi`
-      const referenceCode = `FT${sepayId}`
       const transaction = await db.bankTransaction.create({
         data: {
-          sepayId,
+          sepayId: BigInt(31_000_000 + sequence + Number(termCode)),
           gateway: BANK_ACCOUNT.gateway,
           accountNumber: BANK_ACCOUNT.accountNumber,
           transactionDate: paidAt,
           code,
           content,
-          referenceCode,
+          referenceCode: `FT${sequence}`,
           amount,
           status: BankTransactionStatus.MATCHED,
           matchedStudentId: student.id,
           matchedTermId: term.id,
           rawPayload: {
-            id: Number(sepayId),
             gateway: BANK_ACCOUNT.gateway,
             transactionDate: sepayTime(paidAt),
             accountNumber: BANK_ACCOUNT.accountNumber,
@@ -141,19 +158,15 @@ export async function seedTuition(
             content,
             transferType: 'in',
             transferAmount: Number(amount),
-            accumulated: 0,
-            subAccount: null,
-            referenceCode,
-            description: `BankAPINotify ${content}`,
+            referenceCode: `FT${sequence}`,
           },
-          receivedAt: addDays(paidAt, 0.0001),
-          processedAt: addDays(paidAt, 0.0002),
+          receivedAt: addHours(paidAt, 0.01),
+          processedAt: addHours(paidAt, 0.02),
         },
       })
       bankTransactionId = transaction.id
     }
 
-    const counter = channel === PaymentChannel.COUNTER
     const receipt = await db.receipt.create({
       data: {
         receiptNumber,
@@ -163,204 +176,186 @@ export async function seedTuition(
         amount,
         paidAt,
         bankTransactionId,
-        collectedById: counter ? finance : null,
+        collectedById: channel === PaymentChannel.COUNTER ? people.cashier : null,
         createdAt: paidAt,
       },
     })
-    await db.ledgerEntry.create({
-      data: {
-        studentId: student.id,
-        termId: term.id,
-        type: LedgerEntryType.PAYMENT,
-        direction: LedgerDirection.CREDIT,
-        amount,
-        receiptId: receipt.id,
-        description: `Phiếu thu ${receiptNumber}`,
-        createdById: counter ? finance : null,
-        createdAt: paidAt,
-      },
+    await post(studentCode, termCode, LedgerEntryType.PAYMENT, LedgerDirection.CREDIT, amount, {
+      receiptId: receipt.id,
+      createdById: channel === PaymentChannel.COUNTER ? people.cashier : undefined,
+      createdAt: paidAt,
+      description: `Phiếu thu ${receiptNumber}`,
     })
     return receipt
   }
 
-  for (const termCode of ACTIVE_TERMS) {
+  // HP-02: fixed tuition is posted when each main term enters REGISTRATION.
+  for (const termCode of [IN_PROGRESS_TERM, OPEN_TERM]) {
     const term = must(terms, termCode)
-    const termEnrollments = enrollments.filter((e) => e.termCode === termCode)
-
-    for (const student of people.students) {
-      let due = 0n
-
-      // HP-02: fixed tuition for every student studying in a main term, posted when registration opens.
-      if (term.type !== TermType.SUMMER && studiesIn(student, termCode)) {
-        const { baseTuition } = must(catalog.cohorts, student.cohort)
-        due += (
-          await debit(
-            student,
-            term,
-            LedgerEntryType.BASE_TUITION,
-            baseTuition,
-            `Học phí cố định ${termLabel(termCode)}`,
-            term.registrationStartAt,
-          )
-        ).net
-      }
-
-      // HP-03..05: surcharges at registration time, reversed when the line is cancelled.
-      for (const e of termEnrollments.filter((e) => e.student === student && e.surcharge > 0n)) {
-        const posted = await debit(
+    for (const student of people.students.values()) {
+      const schedule = feeFor(student)
+      if (!schedule) continue // K20 · CLC: no fee schedule on purpose.
+      if (termCode === OPEN_TERM && student.code === DEMO.recalculated) {
+        // HP-12: CQUI → CLC during the registration period; the registered classes stay as they were.
+        const original = await debit(
           student,
-          term,
-          LedgerEntryType.SURCHARGE,
-          e.surcharge,
-          `Phụ thu ${e.courseCode} (${e.attemptType})`,
-          e.registeredAt,
-          e.id,
+          termCode,
+          LedgerEntryType.BASE_TUITION,
+          must(fees, feeKey(student.cohort, 'CQUI')).base,
+          `Học phí cố định HK2 2026–2027 (hồ sơ cũ)`,
+          { createdAt: term.registrationStartAt },
         )
-        due += posted.net
-        if (e.status !== EnrollmentStatus.CANCELLED || !e.cancelledAt) continue
-
-        const reversal = {
-          studentId: student.id,
-          termId: term.id,
-          enrollmentId: e.id,
-          createdAt: e.cancelledAt,
-        }
-        await db.ledgerEntry.create({
-          data: {
-            ...reversal,
-            type: LedgerEntryType.SURCHARGE_REVERSAL,
-            direction: LedgerDirection.CREDIT,
-            amount: e.surcharge,
-            relatedEntryId: posted.entry.id,
-            description: `Huỷ ${e.courseCode}: đảo phụ thu`,
+        await post(
+          student.code,
+          termCode,
+          LedgerEntryType.BASE_TUITION_REVERSAL,
+          LedgerDirection.CREDIT,
+          original.entry.amount,
+          {
+            relatedEntryId: original.entry.id,
+            createdAt: addHours(term.registrationStartAt, 2),
+            description: 'Tính lại học phí: đảo học phí cố định cũ',
           },
-        })
-        if (posted.discountEntry) {
-          await db.ledgerEntry.create({
-            data: {
-              ...reversal,
-              type: LedgerEntryType.DISCOUNT_REVERSAL,
-              direction: LedgerDirection.DEBIT,
-              amount: posted.discountEntry.amount,
-              discountRate: posted.discountEntry.discountRate,
-              relatedEntryId: posted.discountEntry.id,
-              description: `Huỷ ${e.courseCode}: đảo giảm trừ`,
-            },
-          })
-        }
-        due -= posted.net
+        )
+        await debit(
+          { ...student, system: 'CLC' },
+          termCode,
+          LedgerEntryType.BASE_TUITION,
+          schedule.base,
+          'Học phí cố định HK2 2026–2027 (hồ sơ mới CLC)',
+          { createdAt: addHours(term.registrationStartAt, 3), relatedEntryId: original.entry.id },
+        )
+        continue
       }
-
-      // HP-11: last term's credit balance comes off this term.
-      if (termCode === '20261' && student.code === DEMO.overpaid) {
-        const previous = must(terms, '20252')
-        const out = await db.ledgerEntry.create({
-          data: {
-            studentId: student.id,
-            termId: previous.id,
-            type: LedgerEntryType.BALANCE_CARRY_OUT,
-            direction: LedgerDirection.DEBIT,
-            amount: OVERPAYMENT,
-            description: `Chuyển số dư có sang ${termLabel(termCode)}`,
-            createdAt: term.registrationStartAt,
-          },
-        })
-        await db.ledgerEntry.create({
-          data: {
-            studentId: student.id,
-            termId: term.id,
-            type: LedgerEntryType.BALANCE_CARRY_IN,
-            direction: LedgerDirection.CREDIT,
-            amount: OVERPAYMENT,
-            relatedEntryId: out.id,
-            description: `Số dư có chuyển từ ${termLabel(previous.code)}`,
-            createdAt: term.registrationStartAt,
-          },
-        })
-        due -= OVERPAYMENT
-      }
-
-      for (const payment of paymentsFor(student, term, due, now)) {
-        const receipt = await pay(student, term, payment)
-        if (termCode === '20261' && payment.channel === PaymentChannel.BANK_TRANSFER) {
-          await db.notification.create({
-            data: {
-              userId: student.userId,
-              type: 'PAYMENT_RECEIVED',
-              title: 'Đã nhận học phí',
-              body: `Đã ghi nhận ${money(payment.amount)} học phí ${termLabel(termCode)} (phiếu thu ${receipt.receiptNumber}).`,
-              data: { receiptId: receipt.id, termCode },
-              createdAt: addDays(payment.paidAt, 0.0003),
-            },
-          })
-        }
-      }
-
-      // CT-01, CT-02: the ban job ran an hour after the deadline; paying late afterwards does not lift it.
-      if (termCode === '20252' && student.code === DEMO.examBanned) {
-        const bannedAt = addHours(term.tuitionDeadline, 1)
-        await db.examBan.create({
-          data: {
-            studentId: student.id,
-            termId: term.id,
-            outstandingAmount: due,
-            createdAt: bannedAt,
-          },
-        })
-        await db.notification.create({
-          data: {
-            userId: student.userId,
-            type: 'EXAM_BAN',
-            title: 'Bị cấm thi do chưa đóng đủ học phí',
-            body: `Quá hạn đóng học phí ${termLabel(termCode)} còn nợ ${money(due)}. Bạn bị cấm thi cuối kỳ ở mọi lớp của học kỳ này.`,
-            data: { termCode },
-            createdAt: bannedAt,
-          },
-        })
-      }
+      await debit(
+        student,
+        termCode,
+        LedgerEntryType.BASE_TUITION,
+        schedule.base,
+        `Học phí cố định ${termCode === IN_PROGRESS_TERM ? 'HK1' : 'HK2'} 2026–2027`,
+        { createdAt: term.registrationStartAt },
+      )
     }
   }
 
-  // TT-07: transfers the worker could not match wait in the finance office's queue.
-  const unmatched = [
-    { content: 'chuyen tien hoc phi cho em', code: null, amount: 2_000_000n, daysAgo: 3 },
+  // HP-03..05: surcharges at registration, reversed (with their discount) when a line is cancelled.
+  for (const record of enrollments) {
+    if (record.surcharge <= 0n) continue
+    const student = must(people.students, record.studentCode)
+    const posted = await debit(
+      student,
+      record.termCode,
+      LedgerEntryType.SURCHARGE,
+      record.surcharge,
+      `Phụ thu ${record.courseCode} (${record.attemptType})`,
+      { enrollmentId: record.id, createdAt: record.registeredAt },
+    )
+    if (!record.cancelledAt) continue
+    const reversal = { enrollmentId: record.id, createdAt: record.cancelledAt }
+    await post(
+      record.studentCode,
+      record.termCode,
+      LedgerEntryType.SURCHARGE_REVERSAL,
+      LedgerDirection.CREDIT,
+      posted.entry.amount,
+      {
+        ...reversal,
+        relatedEntryId: posted.entry.id,
+        description: `Huỷ ${record.courseCode}: đảo phụ thu`,
+      },
+    )
+  }
+
+  // HP-11: the 500.000đ overpayment in 20261 becomes a credit in the open term.
+  const previous = must(terms, IN_PROGRESS_TERM)
+  const next = must(terms, OPEN_TERM)
+  const carryOut = await post(
+    DEMO.overpaid,
+    IN_PROGRESS_TERM,
+    LedgerEntryType.BALANCE_CARRY_OUT,
+    LedgerDirection.DEBIT,
+    OVERPAYMENT,
     {
-      content: 'HP2452999920261 nop hoc phi',
-      code: 'HP2452999920261',
-      amount: 1_250_000n,
-      daysAgo: 1,
+      createdAt: next.registrationStartAt,
+      description: `Chuyển số dư có sang HK2 2026–2027`,
     },
+  )
+  await post(
+    DEMO.overpaid,
+    OPEN_TERM,
+    LedgerEntryType.BALANCE_CARRY_IN,
+    LedgerDirection.CREDIT,
+    OVERPAYMENT,
+    {
+      relatedEntryId: carryOut.id,
+      createdAt: next.registrationStartAt,
+      description: 'Số dư có chuyển từ HK1 2026–2027',
+    },
+  )
+
+  // 20261: everyone settles before the deadline except the 5M overdue and the 500k overpayment.
+  for (const student of people.students.values()) {
+    const schedule = feeFor(student)
+    if (!schedule) continue
+    const paidAt = addHours(previous.registrationStartAt, 24)
+    if (student.code === DEMO.overdue) {
+      await pay(student.code, IN_PROGRESS_TERM, 10_000_000n, PaymentChannel.COUNTER, paidAt)
+    } else {
+      const net = schedule.base - percentOf(schedule.base, student.discountRate)
+      const amount = student.code === DEMO.overpaid ? schedule.base + OVERPAYMENT : net
+      const channel =
+        student.code === DEMO.overpaid ? PaymentChannel.BANK_TRANSFER : PaymentChannel.COUNTER
+      await pay(student.code, IN_PROGRESS_TERM, amount, channel, paidAt)
+    }
+  }
+
+  // 20262: two settled examples; every other A.7 student still has a QR to pay.
+  await pay(
+    DEMO.discount80,
+    OPEN_TERM,
+    3_000_000n,
+    PaymentChannel.BANK_TRANSFER,
+    vn('2027-01-06', '09:00'),
+  )
+  await pay(
+    DEMO.twoGroups,
+    OPEN_TERM,
+    4_500_000n,
+    PaymentChannel.COUNTER,
+    vn('2027-01-06', '09:30'),
+  )
+
+  // TT-07: transfers the worker could not match wait in the finance office's queue. One uses the A.7
+  // sample payment code HP2452000120262; the other has no readable code.
+  const unmatched: [code: string | null, content: string, amount: bigint][] = [
+    ['HP2452000120262', 'HP2452000120262 nop hoc phi', 1_000_000n],
+    [null, 'chuyen tien hoc phi cho em', 2_000_000n],
   ]
-  for (const t of unmatched) {
-    const sepayId = nextSepayId++
-    const transactionDate = addDays(now, -t.daysAgo)
+  for (const [index, [code, content, amount]] of unmatched.entries()) {
+    const transactionDate = addHours(DEMO_NOW, -(index + 1))
     await db.bankTransaction.create({
       data: {
-        sepayId,
+        sepayId: 31_990_000n + BigInt(index),
         gateway: BANK_ACCOUNT.gateway,
         accountNumber: BANK_ACCOUNT.accountNumber,
         transactionDate,
-        code: t.code,
-        content: t.content,
-        referenceCode: `FT${sepayId}`,
-        amount: t.amount,
+        code,
+        content,
+        referenceCode: `FT99${index}`,
+        amount,
         status: BankTransactionStatus.UNMATCHED,
         rawPayload: {
-          id: Number(sepayId),
           gateway: BANK_ACCOUNT.gateway,
           transactionDate: sepayTime(transactionDate),
           accountNumber: BANK_ACCOUNT.accountNumber,
-          code: t.code,
-          content: t.content,
+          code,
+          content,
           transferType: 'in',
-          transferAmount: Number(t.amount),
-          accumulated: 0,
-          subAccount: null,
-          referenceCode: `FT${sepayId}`,
-          description: `BankAPINotify ${t.content}`,
+          transferAmount: Number(amount),
+          referenceCode: `FT99${index}`,
         },
-        receivedAt: addDays(transactionDate, 0.0001),
-        processedAt: addDays(transactionDate, 0.0002),
+        receivedAt: addHours(transactionDate, 0.01),
+        processedAt: addHours(transactionDate, 0.02),
       },
     })
   }
