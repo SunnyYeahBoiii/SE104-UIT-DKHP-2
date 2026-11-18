@@ -95,6 +95,41 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* BM5 (QĐ05.2) and BB02 (NFR-12): print only the chosen sheet, never the app shell. */
+@media print {
+  @page {
+    size: A4;
+    margin: 14mm;
+  }
+
+  body {
+    background: #fff !important;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  .print-area,
+  .print-area * {
+    visibility: visible !important;
+  }
+
+  .print-area {
+    display: block !important;
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    padding: 0;
+    color: #000;
+    overflow: visible;
+  }
+
+  .print-hide {
+    display: none !important;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

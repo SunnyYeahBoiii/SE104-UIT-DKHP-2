@@ -1,5 +1,11 @@
-import { EmptyPlaceholder } from '@/components/placeholder'
+import { Suspense } from 'react'
+
+import { StudentSchedule } from '@/components/student/student-schedule'
 
 export default function SchedulePage() {
-  return <EmptyPlaceholder title="Lịch học" />
+  return (
+    <Suspense fallback={null}>
+      <StudentSchedule />
+    </Suspense>
+  )
 }

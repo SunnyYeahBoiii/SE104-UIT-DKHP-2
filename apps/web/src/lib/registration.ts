@@ -9,6 +9,21 @@ export type Permission = {
 
 export type AttemptType = 'FIRST' | 'RETAKE' | 'IMPROVEMENT'
 
+export type SectionMeeting = {
+  dayOfWeek: number
+  startSlot: number
+  endSlot: number
+  weeks: number
+  room: string | null
+}
+
+export type SectionClash = {
+  withCode: string
+  dayOfWeek: number
+  startSlot: number
+  endSlot: number
+}
+
 export type Section = {
   id: number
   code: string
@@ -27,6 +42,8 @@ export type Section = {
   practiceMode: string | null
   parentSectionId: number | null
   days: number[]
+  meetings: SectionMeeting[]
+  clash: SectionClash | null
   registered: boolean
   prerequisite: { state: 'OK' | 'MISSING' | 'CONDITIONAL'; message: string | null }
 }

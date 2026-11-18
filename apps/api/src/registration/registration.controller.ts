@@ -14,7 +14,7 @@ import {
 import { Roles, type AuthRequest } from '../auth/auth.guard'
 import { Role } from '../generated/prisma/enums'
 import { RegistrationService } from './registration.service'
-import { registerInput, sectionFilters } from './validation'
+import { registerInput, sectionFilters, timetableScope } from './validation'
 
 @Controller('registration')
 @Roles(Role.STUDENT)
@@ -24,6 +24,12 @@ export class RegistrationController {
   @Get()
   overview(@Req() req: AuthRequest, @Query() query: Record<string, unknown>) {
     return this.registration.overview(req.auth!.user.id, sectionFilters(query))
+  }
+
+  /** B.4.3: student's own weekly timetable, for the term in progress or the one being registered. */
+  @Get('timetable')
+  timetable(@Req() req: AuthRequest, @Query('scope') scope: unknown) {
+    return this.registration.timetable(req.auth!.user.id, timetableScope(scope))
   }
 
   @Post('requests')

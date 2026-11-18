@@ -7,6 +7,7 @@ import {
   effectiveResult,
   firstRule,
   REGISTRATION_RULES,
+  remainingCredits,
   ruleExit,
   ruleMessage,
   type AttemptLike,
@@ -42,6 +43,14 @@ describe('DK-10: rule order and error copy', () => {
     expect(ruleMessage('DK-11', { parentFailed: 'true', parentCode: 'SE104.P21' })).toContain(
       'Lớp LT cha không đăng ký được',
     )
+  })
+})
+
+describe('DK-08: term credit cap', () => {
+  it('uses the summer cap of 12 and reports the credits still available', () => {
+    expect(remainingCredits(12, 10, 3)).toBe(-1)
+    expect(remainingCredits(12, 10, 2)).toBe(0)
+    expect(remainingCredits(24, 21, 3)).toBe(0)
   })
 })
 

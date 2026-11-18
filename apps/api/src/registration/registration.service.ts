@@ -24,16 +24,19 @@ import {
   type Term,
 } from '../generated/prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
+import { findScheduleClash, type ScheduleClash } from './clash'
 import { RegistrationIdempotency } from './idempotency'
 import { prerequisiteCheck, studentAttempts } from './prerequisites'
+import { meetingDates } from './schedule'
 import {
   attemptTypeOf,
   effectiveResult,
+  remainingCredits,
   ruleExit,
   ruleMessage,
   type RegistrationRule,
 } from './policy'
-import type { RegisterInput, SectionFilters } from './validation'
+import type { RegisterInput, SectionFilters, TimetableScope } from './validation'
 
 /** Test seam: E2E freezes the demo day instead of depending on the real clock (A.7 "now"). */
 @Injectable()
@@ -66,6 +69,14 @@ export type Permission = {
   countdownTo: string | null
 }
 
+export type SectionMeetingView = {
+  dayOfWeek: number
+  startSlot: number
+  endSlot: number
+  weeks: number
+  room: string | null
+}
+
 export type SectionView = {
   id: number
   code: string
@@ -84,8 +95,45 @@ export type SectionView = {
   practiceMode: string | null
   parentSectionId: number | null
   days: number[]
+  meetings: SectionMeetingView[]
+  clash: ScheduleClash | null
   registered: boolean
   prerequisite: { state: 'OK' | 'MISSING' | 'CONDITIONAL'; message: string | null }
+}
+
+/** BB02: meetings of the active rows, with concrete dates derived from the weeks bitmask. */
+export type StudentMeetingView = SectionMeetingView & {
+  id: number
+  sectionId: number
+  sectionCode: string
+  courseCode: string
+  courseName: string
+  courseType: CourseType
+  lecturer: string | null
+  dates: string[]
+}
+
+export type UnscheduledSectionView = {
+  sectionId: number
+  sectionCode: string
+  courseCode: string
+  courseName: string
+  courseType: CourseType
+  practiceMode: string | null
+  lecturer: string | null
+}
+
+export type StudentTimetableView = {
+  term: {
+    code: string
+    name: string
+    phase: TermPhase
+    startDate: string
+    weekCount: number
+  } | null
+  today: string
+  meetings: StudentMeetingView[]
+  unscheduled: UnscheduledSectionView[]
 }
 
 export type FormRowView = {
@@ -258,6 +306,82 @@ export class RegistrationService {
     }
   }
 
+  /** B.4.3: the weekly grid (registering term preview or the term being studied). */
+  async timetable(userId: number, scope: TimetableScope): Promise<StudentTimetableView> {
+    const student = await this.loadStudent(userId)
+    const today = this.clock.now().toISOString().slice(0, 10)
+    const term =
+      scope === 'registering'
+        ? await this.openTerm()
+        : await this.prisma.term.findFirst({
+            where: { phase: 'IN_PROGRESS' },
+            orderBy: { startDate: 'desc' },
+            include: {
+              academicYear: true,
+              registrationSlots: { include: { cohorts: true } },
+            },
+          })
+    if (!term) return { term: null, today, meetings: [], unscheduled: [] }
+
+    const form = await this.prisma.registrationForm.findUnique({
+      where: { studentId_termId: { studentId: student.id, termId: term.id } },
+      include: {
+        enrollments: {
+          where: { status: { not: 'CANCELLED' } },
+          include: {
+            course: true,
+            section: { include: { meetings: true, lecturer: { select: { fullName: true } } } },
+          },
+        },
+      },
+    })
+    const rows = form?.enrollments ?? []
+    const allMeetings = rows.flatMap((row) => row.section.meetings)
+    let weekCount = 1
+    for (const meeting of allMeetings)
+      for (let bit = 0; bit < 31; bit++)
+        if ((meeting.weeks & (1 << bit)) !== 0) weekCount = Math.max(weekCount, bit + 1)
+
+    return {
+      term: {
+        code: term.termCode,
+        name: termName(term),
+        phase: term.phase,
+        startDate: term.startDate.toISOString().slice(0, 10),
+        weekCount,
+      },
+      today,
+      meetings: rows.flatMap((row) =>
+        row.section.meetings.map((meeting) => ({
+          id: meeting.id,
+          sectionId: row.section.id,
+          sectionCode: row.section.code,
+          courseCode: row.course.code,
+          courseName: row.course.name,
+          courseType: row.course.type,
+          dayOfWeek: meeting.dayOfWeek,
+          startSlot: meeting.startSlot,
+          endSlot: meeting.endSlot,
+          weeks: meeting.weeks,
+          room: meeting.room,
+          lecturer: row.section.lecturer?.fullName ?? null,
+          dates: meetingDates(term.startDate, meeting.dayOfWeek, meeting.weeks),
+        })),
+      ),
+      unscheduled: rows
+        .filter((row) => row.section.meetings.length === 0)
+        .map((row) => ({
+          sectionId: row.section.id,
+          sectionCode: row.section.code,
+          courseCode: row.course.code,
+          courseName: row.course.name,
+          courseType: row.course.type,
+          practiceMode: row.section.practiceMode,
+          lecturer: row.section.lecturer?.fullName ?? null,
+        })),
+    }
+  }
+
   /** DK-18: every section is judged in its own transaction; one failure never rolls back its siblings. */
   async register(userId: number, idempotencyKey: string, input: RegisterInput) {
     return this.idempotency.run('register', userId, idempotencyKey, async () => {
@@ -317,6 +441,12 @@ export class RegistrationService {
         if (permission.state !== 'OPEN')
           this.fail('OUTSIDE_REGISTRATION_WINDOW', permission.message, 409)
         if (!termRecord) this.fail('OUTSIDE_REGISTRATION_WINDOW', permission.message, 409)
+        // Same lock order as registration: form row first, then the section being released.
+        const locked = await tx.$queryRaw<{ id: number }[]>`
+          SELECT id FROM registration_form
+          WHERE student_id = ${student.id} AND term_id = ${termRecord.id} FOR UPDATE`
+        if (locked.length === 0)
+          this.fail('ENROLLMENT_NOT_ACTIVE', 'Dòng đăng ký này không còn hiệu lực.', 409)
 
         const enrollment = await tx.enrollment.findUnique({
           where: { id: enrollmentId },
@@ -613,18 +743,28 @@ export class RegistrationService {
   ): Promise<RegistrationResult> {
     try {
       return await this.prisma.$transaction(async (tx) => {
-        // ADR-0005: serialise this student's writes before touching any hot section row.
-        await tx.$queryRaw`SELECT id FROM student WHERE id = ${context.student.id} FOR UPDATE`
         const term = await this.openTerm(tx)
         const permission = permissionFor(term, context.student, this.clock.now())
         if (permission.state !== 'OPEN') throw new RuleFailure('DK-02')
         if (!term || term.id !== context.term.id) throw new RuleFailure('DK-02')
+
+        // ADR-0005: the form row is the per-student lock. It must exist first; ON CONFLICT DO
+        // NOTHING lets two parallel first registrations share the same row instead of one failing.
+        await tx.registrationForm.createMany({
+          data: [{ studentId: context.student.id, termId: term.id }],
+          skipDuplicates: true,
+        })
+        const locked = await tx.$queryRaw<{ id: number }[]>`
+          SELECT id FROM registration_form
+          WHERE student_id = ${context.student.id} AND term_id = ${term.id} FOR UPDATE`
+        const formId = locked[0]!.id
 
         const section = await tx.courseSection.findUnique({
           where: { id: sectionId },
           include: {
             offeredCourse: { include: { course: true } },
             trainingSystem: true,
+            meetings: true,
           },
         })
         const detail = { code: section?.code ?? String(sectionId) }
@@ -639,15 +779,7 @@ export class RegistrationService {
 
         const course = section.offeredCourse.course
         const groupIds = await this.equivalenceIds(course, tx)
-        let form = await tx.registrationForm.findUnique({
-          where: {
-            studentId_termId: { studentId: context.student.id, termId: term.id },
-          },
-        })
-        if (!form)
-          form = await tx.registrationForm.create({
-            data: { studentId: context.student.id, termId: term.id },
-          })
+        const form = await tx.registrationForm.findUniqueOrThrow({ where: { id: formId } })
         if (form.finalizedAt) throw new RuleFailure('DK-02')
         const duplicate = await tx.enrollment.findFirst({
           where: { formId: form.id, status: { not: 'CANCELLED' }, courseId: { in: groupIds } },
@@ -699,6 +831,34 @@ export class RegistrationService {
             courseCode: course.code,
             reason: prerequisite.message,
           })
+
+        const active = await tx.enrollment.findMany({
+          where: { formId: form.id, status: { not: 'CANCELLED' } },
+          include: { section: { include: { meetings: true } } },
+        })
+        const clash = findScheduleClash(
+          { code: section.code, meetings: section.meetings },
+          active.map((row) => ({ code: row.section.code, meetings: row.section.meetings })),
+        )
+        if (clash)
+          throw new RuleFailure('DK-07', {
+            ...detail,
+            clashWith: clash.withCode,
+            day: String(clash.dayOfWeek),
+            slots: `${clash.startSlot}–${clash.endSlot}`,
+          })
+        // DK-08: the summer cap lives on the term (12 credits) and is read under the form lock.
+        const left = remainingCredits(
+          term.maxCredits,
+          active.reduce((sum, row) => sum + row.credits, 0),
+          section.offeredCourse.credits,
+        )
+        if (left < 0)
+          throw new RuleFailure('DK-08', {
+            ...detail,
+            remaining: String(Math.max(0, left + section.offeredCourse.credits)),
+          })
+
         // DK-09 last: the conditional UPDATE is the only seat allocator (ADR-0005).
         const won = await tx.$executeRaw`
           UPDATE course_section SET enrolled_count = enrolled_count + 1, updated_at = now()
@@ -755,6 +915,12 @@ export class RegistrationService {
       orderBy: { code: 'asc' },
     })
     const registeredCourses = new Set(form.rows.map((row) => row.courseCode))
+    const enrolled = form.rows.length
+      ? await this.prisma.courseSection.findMany({
+          where: { id: { in: form.rows.map((row) => row.sectionId) } },
+          select: { code: true, meetings: true },
+        })
+      : []
     const views: SectionView[] = []
     for (const row of rows) {
       const course = row.offeredCourse.course
@@ -776,6 +942,20 @@ export class RegistrationService {
         practiceMode: row.practiceMode,
         parentSectionId: row.parentSectionId,
         days: [...new Set(row.meetings.map((meeting) => meeting.dayOfWeek))].sort(),
+        meetings: row.meetings.map((meeting) => ({
+          dayOfWeek: meeting.dayOfWeek,
+          startSlot: meeting.startSlot,
+          endSlot: meeting.endSlot,
+          weeks: meeting.weeks,
+          room: meeting.room,
+        })),
+        clash:
+          row.meetings.length === 0
+            ? null
+            : findScheduleClash(
+                { code: row.code, meetings: row.meetings },
+                enrolled.filter((item) => item.code !== row.code),
+              ),
         registered: registeredCourses.has(course.code),
         prerequisite: { state: 'OK', message: null },
       }
@@ -790,6 +970,7 @@ export class RegistrationService {
       if (filters.day && !view.days.includes(filters.day)) continue
       if (filters.courseType && view.courseType !== filters.courseType) continue
       if (filters.reserved && view.reservedAdmissionYear !== student.cohort.admissionYear) continue
+      if (filters.noClash && view.clash !== null) continue
       view.attemptType = await this.attemptFor(
         student.id,
         course,
