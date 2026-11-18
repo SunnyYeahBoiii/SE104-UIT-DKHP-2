@@ -102,12 +102,13 @@ describe('BM7 from the ledger — A.7 sample students', () => {
       paid: 500_000,
       due: 14_500_000,
     },
+    // Cancelled IT002.P21's 81k surcharge is reversed, so it is neither a charge nor a payment.
     {
       code: '24520009',
       term: '20262',
-      gross: 15_162_000,
-      net: 15_162_000,
-      paid: 81_000,
+      gross: 15_081_000,
+      net: 15_081_000,
+      paid: 0,
       due: 15_081_000,
     },
     { code: '24520010', term: '20263', gross: 81_000, net: 81_000, paid: 0, due: 81_000 },

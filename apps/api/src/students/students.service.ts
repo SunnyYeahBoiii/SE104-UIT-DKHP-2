@@ -6,6 +6,8 @@ import { SessionStore } from '../auth/session.store'
 import { Role } from '../generated/prisma/enums'
 import type { Prisma } from '../generated/prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
+import { recalculationReason } from '../tuition/recalculation'
+import { TuitionService, type TuitionPreview } from '../tuition/tuition.service'
 
 export type StudentInput = {
   studentCode: string
@@ -69,6 +71,7 @@ export class StudentsService {
     private readonly prisma: PrismaService,
     private readonly hasher: PasswordHasher,
     private readonly sessions: SessionStore,
+    private readonly tuition: TuitionService,
   ) {}
 
   async list(query: StudentQuery) {
@@ -235,41 +238,95 @@ export class StudentsService {
     return { item: this.toItem(created), temporaryPassword: temporary }
   }
 
-  async update(code: string, input: StudentInput, audit: AuditContext) {
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const student = await tx.student.findUnique({ where: { studentCode: code } })
-      if (!student)
-        throw new NotFoundException({ code: 'STUDENT_NOT_FOUND', message: 'Không tìm thấy hồ sơ.' })
-      await this.assertReferences(tx, input)
-      await tx.student.update({
-        where: { id: student.id },
-        data: {
-          fullName: input.fullName,
-          email: input.email,
-          cohortId: input.cohortId,
-          trainingSystemId: input.trainingSystemId,
-        },
-      })
-      await tx.studentPriorityGroup.deleteMany({ where: { studentId: student.id } })
-      if (input.priorityGroupIds.length > 0) {
-        await tx.studentPriorityGroup.createMany({
-          data: input.priorityGroupIds.map((priorityGroupId) => ({
-            studentId: student.id,
-            priorityGroupId,
-          })),
-        })
-      }
-      const result = await tx.student.findUniqueOrThrow({
-        where: { id: student.id },
-        include: {
-          cohort: true,
-          trainingSystem: true,
-          priorityGroups: { include: { priorityGroup: true } },
-        },
-      })
-      await this.writeAudit(tx, 'STUDENT_UPDATED', code, input, audit)
-      return result
+  /** C.4.3: preview before the officer confirms; reads only, so a rejected edit leaves no trace. */
+  async previewTuition(code: string, input: StudentInput): Promise<TuitionPreview> {
+    return this.tuition.preview(code, {
+      cohortId: input.cohortId,
+      trainingSystemId: input.trainingSystemId,
+      priorityGroupIds: input.priorityGroupIds,
     })
+  }
+
+  async update(code: string, input: StudentInput, audit: AuditContext) {
+    return this.prisma.$transaction((tx) => this.applyUpdate(tx, code, input, audit))
+  }
+
+  /** HP-12: profile edit, recalculation rows and audit rows share the caller's transaction. */
+  async applyUpdate(
+    tx: Prisma.TransactionClient,
+    code: string,
+    input: StudentInput,
+    audit: AuditContext,
+  ) {
+    const student = await tx.student.findUnique({
+      where: { studentCode: code },
+      include: { cohort: true, trainingSystem: true, priorityGroups: true },
+    })
+    if (!student)
+      throw new NotFoundException({ code: 'STUDENT_NOT_FOUND', message: 'Không tìm thấy hồ sơ.' })
+    await this.assertReferences(tx, input)
+    const [cohort, system] = await Promise.all([
+      tx.cohort.findUniqueOrThrow({ where: { id: input.cohortId } }),
+      tx.trainingSystem.findUniqueOrThrow({ where: { id: input.trainingSystemId } }),
+    ])
+    const reason = recalculationReason(
+      {
+        cohortId: student.cohortId,
+        trainingSystemId: student.trainingSystemId,
+        cohortCode: student.cohort.code,
+        trainingSystemCode: student.trainingSystem.code,
+        priorityGroupIds: student.priorityGroups.map((link) => link.priorityGroupId),
+      },
+      {
+        cohortId: cohort.id,
+        trainingSystemId: system.id,
+        cohortCode: cohort.code,
+        trainingSystemCode: system.code,
+        priorityGroupIds: input.priorityGroupIds,
+      },
+    )
+    const plans = reason
+      ? await this.tuition.plansForUpdate(
+          tx,
+          student,
+          {
+            cohortId: cohort.id,
+            trainingSystemId: system.id,
+            priorityGroupIds: input.priorityGroupIds,
+          },
+          reason,
+        )
+      : []
+
+    await tx.student.update({
+      where: { id: student.id },
+      data: {
+        fullName: input.fullName,
+        email: input.email,
+        cohortId: input.cohortId,
+        trainingSystemId: input.trainingSystemId,
+      },
+    })
+    await tx.studentPriorityGroup.deleteMany({ where: { studentId: student.id } })
+    if (input.priorityGroupIds.length > 0) {
+      await tx.studentPriorityGroup.createMany({
+        data: input.priorityGroupIds.map((priorityGroupId) => ({
+          studentId: student.id,
+          priorityGroupId,
+        })),
+      })
+    }
+    for (const plan of plans) await this.tuition.applyPlan(tx, student, plan, audit)
+
+    const updated = await tx.student.findUniqueOrThrow({
+      where: { id: student.id },
+      include: {
+        cohort: true,
+        trainingSystem: true,
+        priorityGroups: { include: { priorityGroup: true } },
+      },
+    })
+    await this.writeAudit(tx, 'STUDENT_UPDATED', code, input, audit)
     return { item: this.toItem(updated) }
   }
 

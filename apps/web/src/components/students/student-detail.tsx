@@ -9,11 +9,21 @@ import {
   ACTION_LABELS,
   formatDate,
   formatMoney,
+  profileChanged,
   type Student,
   type StudentDetailResponse,
   type StudentPayload,
+  type TuitionPreview,
+  type TuitionPreviewTerm,
 } from '@/lib/students'
-import { ConfirmDialog, Drawer, OneTimeSecretDialog, StudentForm } from './student-ui'
+import {
+  BeforeAfter,
+  ConfirmDialog,
+  Drawer,
+  NoticeDialog,
+  OneTimeSecretDialog,
+  StudentForm,
+} from './student-ui'
 
 type Tab = 'profile' | 'forms' | 'audit'
 
@@ -27,6 +37,11 @@ export function StudentDetail({ code }: { code: string }) {
   const [deleting, setDeleting] = useState(false)
   const [busy, setBusy] = useState(false)
   const [secret, setSecret] = useState<string | null>(null)
+  const [pending, setPending] = useState<{
+    value: StudentPayload
+    term: TuitionPreviewTerm | null
+  } | null>(null)
+  const [notice, setNotice] = useState('')
 
   const reload = useCallback(async () => {
     try {
@@ -41,18 +56,53 @@ export function StudentDetail({ code }: { code: string }) {
     void Promise.resolve().then(() => reload())
   }, [reload])
 
-  const update = async (value: StudentPayload) => {
+  const update = async (value: StudentPayload): Promise<boolean> => {
     setBusy(true)
     setError('')
     try {
       await api(`/students/${code}`, { method: 'PATCH', body: JSON.stringify(value) })
       setEditing(false)
       await reload()
+      return true
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : 'Không lưu được hồ sơ.')
+      return false
     } finally {
       setBusy(false)
     }
+  }
+
+  // HP-12/C.4.3: changing cohort, system or priority group previews tuition first; the officer's
+  // confirmation is the same PATCH that used to save a plain profile edit.
+  const submit = async (value: StudentPayload) => {
+    const student: Student = data!.item
+    if (!profileChanged(student, value)) {
+      await update(value)
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      const preview = await api<TuitionPreview>(`/students/${code}/tuition-preview`, {
+        method: 'POST',
+        body: JSON.stringify(value),
+      })
+      const term = preview.terms[0] ?? null
+      if (term?.blocked) {
+        setNotice(term.blocked.message)
+        return
+      }
+      setPending({ value, term })
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'Không xem trước được học phí.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const confirmPending = async () => {
+    if (!pending) return
+    if (await update(pending.value)) setPending(null)
   }
 
   const resetPassword = async () => {
@@ -289,7 +339,7 @@ export function StudentDetail({ code }: { code: string }) {
             editing
             busy={busy}
             error={error}
-            onSubmit={update}
+            onSubmit={(value) => void submit(value)}
             onCancel={() => setEditing(false)}
           />
           <p className="mt-4 text-xs text-muted">
@@ -320,6 +370,45 @@ export function StudentDetail({ code }: { code: string }) {
           onConfirm={() => void remove()}
           onCancel={() => setDeleting(false)}
         />
+      ) : null}
+
+      {pending ? (
+        <ConfirmDialog
+          title={
+            pending.term ? `Tính lại học phí ${pending.term.termName}` : 'Thay đổi từ học kỳ sau'
+          }
+          tone="primary"
+          confirmLabel="Xác nhận"
+          busy={busy}
+          onConfirm={() => void confirmPending()}
+          onCancel={() => setPending(null)}
+          message={
+            pending.term ? (
+              <div className="space-y-3">
+                <BeforeAfter term={pending.term} />
+                <p>
+                  Hệ thống sẽ ghi dòng đảo cho các khoản nợ và giảm trừ của học kỳ này rồi ghi lại
+                  theo hồ sơ mới. Thanh toán đã có giữ nguyên. Các học kỳ trước không đổi.
+                </p>
+                {pending.term.reason.includes('hệ') ? (
+                  <p>Các lớp đã đăng ký giữ nguyên dù khác hệ mới.</p>
+                ) : null}
+                {pending.term.creditBalance > 0 ? (
+                  <p>
+                    Số dư có {formatMoney(pending.term.creditBalance)} sẽ được chuyển sang học kỳ
+                    sau.
+                  </p>
+                ) : null}
+              </div>
+            ) : (
+              <p>Thay đổi áp dụng từ học kỳ sau. Học phí đã phát sinh không đổi.</p>
+            )
+          }
+        />
+      ) : null}
+
+      {notice ? (
+        <NoticeDialog title="Chưa thể lưu hồ sơ" message={notice} onClose={() => setNotice('')} />
       ) : null}
 
       {secret ? <OneTimeSecretDialog password={secret} onClose={() => setSecret(null)} /> : null}

@@ -1,4 +1,4 @@
-import { HttpException, Injectable } from '@nestjs/common'
+import { HttpException, Injectable, NotFoundException } from '@nestjs/common'
 
 import { ReceivingAccountService } from '../finance/receiving-account.service'
 import {
@@ -6,13 +6,64 @@ import {
   LedgerDirection,
   LedgerEntryType,
   Prisma,
+  TermPhase,
   TermType,
   type AcademicYear,
   type Term,
 } from '../generated/prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
+import {
+  missingFeeScheduleMessage,
+  projectAfter,
+  recalculationGroup,
+  recalculationReason,
+  recalculationGroupOf,
+  type ProfileFacts,
+} from './recalculation'
 
 type Db = Prisma.TransactionClient | PrismaService
+
+/** The three profile fields HS-14 says can change tuition; all other profile fields are plain edits. */
+export type ProfileDraft = {
+  cohortId: number
+  trainingSystemId: number
+  priorityGroupIds: number[]
+}
+
+type StudentWithProfile = {
+  id: number
+  studentCode: string
+  cohortId: number
+  trainingSystemId: number
+  cohort: { code: string }
+  trainingSystem: { code: string }
+  priorityGroups: { priorityGroupId: number }[]
+}
+
+export type BeforeAfterRow = {
+  baseTuition: number
+  surcharge: number
+  discount: number
+  netAmount: number
+  outstandingAmount: number
+}
+
+export type TuitionPreviewTerm = {
+  termCode: string
+  termName: string
+  phase: TermPhase
+  reason: string
+  before: BeforeAfterRow
+  after: BeforeAfterRow
+  /** Amount moved to the next term when the new net amount is below what was already paid. */
+  creditBalance: number
+  blocked: { code: string; message: string } | null
+}
+
+export type TuitionPreview = {
+  student: { studentCode: string; fullName: string }
+  terms: TuitionPreviewTerm[]
+}
 
 /** HP-01: a missing pair blocks the whole phase transition, so the warning travels with the error. */
 export class MissingFeeScheduleError extends Error {
@@ -86,8 +137,42 @@ export type TuitionOverview = {
 type Totals = {
   debits: bigint
   credits: bigint
+  charges: bigint
+  chargeReversals: bigint
   discountCredits: bigint
   discountReversals: bigint
+  carriedOut: bigint
+  paid: bigint
+}
+
+type DebitType = typeof LedgerEntryType.BASE_TUITION | typeof LedgerEntryType.SURCHARGE
+
+type OldDebit = {
+  id: number
+  type: DebitType
+  amount: bigint
+  enrollmentId: number | null
+  courseCode: string | null
+  attemptType: AttemptType | null
+  discount: { id: number; amount: bigint; discountRate: number | null } | null
+}
+
+type NewDebit = {
+  type: DebitType
+  amount: bigint
+  enrollmentId: number | null
+  description: string
+}
+
+/** HP-12: everything the confirm step needs, computed once so preview and write cannot disagree. */
+export type RecalculationPlan = {
+  term: Term
+  reason: string
+  old: OldDebit[]
+  next: NewDebit[]
+  discount: { rate: number; name: string } | null
+  before: BeforeAfterRow
+  after: BeforeAfterRow
 }
 
 const ATTEMPT_LABEL: Record<AttemptType, string> = {
@@ -131,8 +216,12 @@ export class TuitionService {
       enrollmentId?: number
       relatedEntryId?: number
       createdAt?: Date
+      /** HP-12: shared heading so every row of one recalculation groups in the ledger. */
+      group?: string
+      discount?: { rate: number; name: string } | null
     },
   ): Promise<{ entryId: number; net: bigint }> {
+    const label = (text: string) => (args.group ? `${args.group} — ${text}` : text)
     const debit = await db.ledgerEntry.create({
       data: {
         studentId: args.studentId,
@@ -140,13 +229,14 @@ export class TuitionService {
         type: args.type,
         direction: LedgerDirection.DEBIT,
         amount: args.amount,
-        description: args.description,
+        description: label(args.description),
         enrollmentId: args.enrollmentId ?? null,
         relatedEntryId: args.relatedEntryId ?? null,
         createdAt: args.createdAt ?? new Date(),
       },
     })
-    const discount = await this.discountFor(db, args.studentId)
+    const discount =
+      args.discount === undefined ? await this.discountFor(db, args.studentId) : args.discount
     const amount = discount ? discountOf(args.amount, discount.rate) : 0n
     if (discount && amount > 0n) {
       await db.ledgerEntry.create({
@@ -157,7 +247,7 @@ export class TuitionService {
           direction: LedgerDirection.CREDIT,
           amount,
           discountRate: discount.rate,
-          description: `Giảm ${discount.rate}% · ${discount.name} — ${args.description}`,
+          description: label(`Giảm ${discount.rate}% · ${discount.name} — ${args.description}`),
           enrollmentId: args.enrollmentId ?? null,
           relatedEntryId: debit.id,
           createdAt: args.createdAt ?? new Date(),
@@ -312,40 +402,421 @@ export class TuitionService {
       where: { studentId, termId },
       select: { type: true, direction: true, amount: true },
     })
-    const totals: Totals = { debits: 0n, credits: 0n, discountCredits: 0n, discountReversals: 0n }
+    const totals: Totals = {
+      debits: 0n,
+      credits: 0n,
+      charges: 0n,
+      chargeReversals: 0n,
+      discountCredits: 0n,
+      discountReversals: 0n,
+      carriedOut: 0n,
+      paid: 0n,
+    }
     for (const row of rows) {
       if (row.direction === LedgerDirection.DEBIT) {
         totals.debits += row.amount
+        if (row.type === LedgerEntryType.BASE_TUITION || row.type === LedgerEntryType.SURCHARGE)
+          totals.charges += row.amount
         if (row.type === LedgerEntryType.DISCOUNT_REVERSAL) totals.discountReversals += row.amount
+        if (row.type === LedgerEntryType.BALANCE_CARRY_OUT) totals.carriedOut += row.amount
       } else {
         totals.credits += row.amount
         if (row.type === LedgerEntryType.DISCOUNT) totals.discountCredits += row.amount
+        if (
+          row.type === LedgerEntryType.BASE_TUITION_REVERSAL ||
+          row.type === LedgerEntryType.SURCHARGE_REVERSAL
+        )
+          totals.chargeReversals += row.amount
+        if (row.type === LedgerEntryType.PAYMENT || row.type === LedgerEntryType.BALANCE_CARRY_IN)
+          totals.paid += row.amount
       }
     }
     return totals
   }
 
   /**
-   * HP-09/ADR-0004: figures are derived, never stored. gross excludes discount reversals (they undo a
-   * credit), discount is net of its reversal, and every other credit (payment, surcharge reversal,
-   * carried balance) reduces what is left to pay. The identity gross − discount − paid = Σdebit − Σcredit
-   * keeps the three columns consistent with the append-only ledger.
+   * HP-09/ADR-0004: figures are derived, never stored. Append-only reversals cancel their originals,
+   * so gross counts charges net of reversals plus any credit balance carried out; discount is net of
+   * its reversal; paid is receipts plus carried-in balance. Gross − discount − paid always equals
+   * Σdebit − Σcredit, which is what carries and overpayments actually move.
    */
   async bm7(db: Db, studentId: number, termId: number): Promise<Bm7> {
-    const { debits, credits, discountCredits, discountReversals } = await this.totals(
-      db,
-      studentId,
-      termId,
-    )
-    const gross = debits - discountReversals
+    const { charges, chargeReversals, discountCredits, discountReversals, carriedOut, paid } =
+      await this.totals(db, studentId, termId)
+    const gross = charges - chargeReversals + carriedOut
     const discount = discountCredits - discountReversals
-    const paid = credits - discountCredits
     return {
       grossAmount: Number(gross),
       discountAmount: Number(discount),
       netAmount: Number(gross - discount),
       paidAmount: Number(paid),
       outstandingAmount: Number(gross - discount - paid),
+    }
+  }
+
+  // ── HP-12 / HS-14: recalculation on a profile edit during an open registration window ──
+
+  /** C.4.3: read-only BeforeAfter. Nothing here writes, so the officer can preview and cancel safely. */
+  async preview(studentCode: string, draft: ProfileDraft): Promise<TuitionPreview> {
+    const student = await this.prisma.student.findUnique({
+      where: { studentCode },
+      include: {
+        cohort: true,
+        trainingSystem: true,
+        priorityGroups: { include: { priorityGroup: true } },
+      },
+    })
+    if (!student)
+      throw new NotFoundException({ code: 'STUDENT_NOT_FOUND', message: 'Không tìm thấy hồ sơ.' })
+    const base = {
+      student: { studentCode: student.studentCode, fullName: student.fullName },
+      terms: [] as TuitionPreviewTerm[],
+    }
+    const facts = await this.profileFacts(this.prisma, draft)
+    const reason = recalculationReason(this.currentFacts(student), facts)
+    if (!reason) return base
+
+    for (const term of await this.openTerms(this.prisma)) {
+      const planned = await this.planTerm(this.prisma, student, facts, term, reason)
+      if (!planned) continue
+      if ('blocked' in planned) {
+        const before = await this.beforeRow(this.prisma, student.id, term.id, 0n, 0n)
+        base.terms.push({
+          termCode: term.termCode,
+          termName: termName(term),
+          phase: term.phase,
+          reason,
+          before,
+          after: before,
+          creditBalance: 0,
+          blocked: planned.blocked,
+        })
+        continue
+      }
+      base.terms.push({
+        termCode: term.termCode,
+        termName: termName(term),
+        phase: term.phase,
+        reason,
+        before: planned.before,
+        after: planned.after,
+        creditBalance: Math.max(0, -planned.after.outstandingAmount),
+        blocked: null,
+      })
+    }
+    return base
+  }
+
+  /**
+   * Called inside the profile-edit transaction. A missing fee table blocks the whole PATCH; the
+   * exception travels back to the officer with the exact "Liên hệ Phòng Tài vụ" wording.
+   */
+  async plansForUpdate(
+    db: Prisma.TransactionClient,
+    student: StudentWithProfile,
+    draft: ProfileDraft,
+    reason: string,
+  ): Promise<RecalculationPlan[]> {
+    const facts = await this.profileFacts(db, draft)
+    const plans: RecalculationPlan[] = []
+    for (const term of await this.openTerms(db)) {
+      const planned = await this.planTerm(db, student, facts, term, reason)
+      if (!planned) continue
+      if ('blocked' in planned) {
+        throw new HttpException(
+          { code: planned.blocked.code, message: planned.blocked.message, termCode: term.termCode },
+          409,
+        )
+      }
+      plans.push(planned)
+    }
+    return plans
+  }
+
+  /** All rows of one run share a heading; the profile edit and these rows commit together. */
+  async applyPlan(
+    db: Prisma.TransactionClient,
+    student: StudentWithProfile,
+    plan: RecalculationPlan,
+    audit: { actorId?: number; requestId?: string; ip?: string },
+  ): Promise<void> {
+    const actorId = audit.actorId ?? null
+    const at = new Date()
+    const group = recalculationGroup(plan.reason, at)
+    for (const old of plan.old) {
+      const reversalType =
+        old.type === LedgerEntryType.BASE_TUITION
+          ? LedgerEntryType.BASE_TUITION_REVERSAL
+          : LedgerEntryType.SURCHARGE_REVERSAL
+      await db.ledgerEntry.create({
+        data: {
+          studentId: student.id,
+          termId: plan.term.id,
+          type: reversalType,
+          direction: LedgerDirection.CREDIT,
+          amount: old.amount,
+          description: `${group} — Đảo ${old.type === LedgerEntryType.BASE_TUITION ? 'học phí cố định' : 'phụ thu'}`,
+          enrollmentId: old.enrollmentId,
+          relatedEntryId: old.id,
+          createdById: actorId,
+          createdAt: at,
+        },
+      })
+      if (!old.discount) continue
+      await db.ledgerEntry.create({
+        data: {
+          studentId: student.id,
+          termId: plan.term.id,
+          type: LedgerEntryType.DISCOUNT_REVERSAL,
+          direction: LedgerDirection.DEBIT,
+          amount: old.discount.amount,
+          discountRate: old.discount.discountRate,
+          description: `${group} — Đảo giảm trừ`,
+          enrollmentId: old.enrollmentId,
+          relatedEntryId: old.discount.id,
+          createdById: actorId,
+          createdAt: at,
+        },
+      })
+    }
+    for (const next of plan.next) {
+      await this.debit(db, {
+        studentId: student.id,
+        termId: plan.term.id,
+        type: next.type,
+        amount: next.amount,
+        description: next.description,
+        enrollmentId: next.enrollmentId ?? undefined,
+        createdAt: at,
+        group,
+        discount: plan.discount,
+      })
+    }
+    // HP-11: a negative outstanding amount is a credit balance. Payments are never reversed, and the
+    // existing term-transition hook carries that surplus to the next term.
+    await db.auditLog.create({
+      data: {
+        actorId,
+        action: 'TUITION_RECALCULATED',
+        entityType: 'Student',
+        entityId: student.studentCode,
+        payload: JSON.parse(
+          JSON.stringify({
+            termCode: plan.term.termCode,
+            reason: plan.reason,
+            group,
+            before: plan.before,
+            after: plan.after,
+          }),
+        ) as Prisma.InputJsonValue,
+        requestId: audit.requestId ?? null,
+        ip: audit.ip ?? null,
+        createdAt: at,
+      },
+    })
+  }
+
+  private currentFacts(student: StudentWithProfile): ProfileFacts {
+    return {
+      cohortId: student.cohortId,
+      trainingSystemId: student.trainingSystemId,
+      cohortCode: student.cohort.code,
+      trainingSystemCode: student.trainingSystem.code,
+      priorityGroupIds: student.priorityGroups.map((link) => link.priorityGroupId),
+    }
+  }
+
+  private async profileFacts(db: Db, draft: ProfileDraft): Promise<ProfileFacts> {
+    const cohort = await db.cohort.findUniqueOrThrow({ where: { id: draft.cohortId } })
+    const system = await db.trainingSystem.findUniqueOrThrow({
+      where: { id: draft.trainingSystemId },
+    })
+    return {
+      cohortId: cohort.id,
+      trainingSystemId: system.id,
+      cohortCode: cohort.code,
+      trainingSystemCode: system.code,
+      priorityGroupIds: [...draft.priorityGroupIds].sort((a, b) => a - b),
+    }
+  }
+
+  private async openTerms(db: Db): Promise<Term[]> {
+    return db.term.findMany({
+      where: { phase: { in: [TermPhase.REGISTRATION, TermPhase.ADJUSTMENT] } },
+      orderBy: { registrationStartAt: 'asc' },
+    })
+  }
+
+  private async discountForDraft(db: Db, ids: number[]) {
+    const groups = await db.priorityGroup.findMany({
+      where: { id: { in: ids } },
+      orderBy: { priority: 'desc' },
+    })
+    const best = groups[0]
+    return best && best.discountRate > 0 ? { rate: best.discountRate, name: best.name } : null
+  }
+
+  private async activeDebits(db: Db, studentId: number, termId: number): Promise<OldDebit[]> {
+    const debits = await db.ledgerEntry.findMany({
+      where: {
+        studentId,
+        termId,
+        type: { in: [LedgerEntryType.BASE_TUITION, LedgerEntryType.SURCHARGE] },
+        direction: LedgerDirection.DEBIT,
+      },
+      include: { enrollment: { include: { course: true } } },
+      orderBy: { id: 'asc' },
+    })
+    const reversals = await db.ledgerEntry.findMany({
+      where: {
+        studentId,
+        termId,
+        type: { in: [LedgerEntryType.BASE_TUITION_REVERSAL, LedgerEntryType.SURCHARGE_REVERSAL] },
+        direction: LedgerDirection.CREDIT,
+      },
+      select: { relatedEntryId: true },
+    })
+    const discounts = await db.ledgerEntry.findMany({
+      where: {
+        studentId,
+        termId,
+        type: LedgerEntryType.DISCOUNT,
+        direction: LedgerDirection.CREDIT,
+      },
+      include: {
+        relatedFrom: { where: { type: LedgerEntryType.DISCOUNT_REVERSAL }, select: { id: true } },
+      },
+    })
+    const reversed = new Set(reversals.map((row) => row.relatedEntryId))
+    return debits
+      .filter((debit) => !reversed.has(debit.id))
+      .map((debit) => {
+        const discount = discounts.find(
+          (row) => row.relatedEntryId === debit.id && row.relatedFrom.length === 0,
+        )
+        return {
+          id: debit.id,
+          type: debit.type as DebitType,
+          amount: debit.amount,
+          enrollmentId: debit.enrollmentId,
+          courseCode: debit.enrollment?.course.code ?? null,
+          attemptType: debit.enrollment?.attemptType ?? null,
+          discount: discount
+            ? { id: discount.id, amount: discount.amount, discountRate: discount.discountRate }
+            : null,
+        }
+      })
+  }
+
+  private async beforeRow(
+    db: Db,
+    studentId: number,
+    termId: number,
+    base: bigint,
+    surcharge: bigint,
+  ) {
+    const bm7 = await this.bm7(db, studentId, termId)
+    return {
+      baseTuition: Number(base),
+      surcharge: Number(surcharge),
+      discount: bm7.discountAmount,
+      netAmount: bm7.netAmount,
+      outstandingAmount: bm7.outstandingAmount,
+    }
+  }
+
+  private async planTerm(
+    db: Db,
+    student: StudentWithProfile,
+    facts: ProfileFacts,
+    term: Term,
+    reason: string,
+  ): Promise<RecalculationPlan | { blocked: { code: string; message: string } } | null> {
+    const old = await this.activeDebits(db, student.id, term.id)
+    // A profile created after the window opened has no charges in it; there is nothing to reverse or
+    // re-post, so the edit is a plain save (and a missing fee table cannot block it).
+    if (old.length === 0) return null
+    const schedule =
+      term.type === TermType.SUMMER
+        ? null
+        : await db.feeSchedule.findUnique({
+            where: {
+              cohortId_trainingSystemId: {
+                cohortId: facts.cohortId,
+                trainingSystemId: facts.trainingSystemId,
+              },
+            },
+          })
+    if (term.type !== TermType.SUMMER && !schedule)
+      return {
+        blocked: {
+          code: 'MISSING_FEE_SCHEDULE',
+          message: missingFeeScheduleMessage(facts.cohortCode, facts.trainingSystemCode),
+        },
+      }
+
+    const oldBase = old.reduce(
+      (sum, row) => sum + (row.type === LedgerEntryType.BASE_TUITION ? row.amount : 0n),
+      0n,
+    )
+    const oldSurcharge = old.reduce(
+      (sum, row) => sum + (row.type === LedgerEntryType.SURCHARGE ? row.amount : 0n),
+      0n,
+    )
+    const oldDiscount = old.reduce((sum, row) => sum + (row.discount?.amount ?? 0n), 0n)
+    const before = await this.beforeRow(db, student.id, term.id, oldBase, oldSurcharge)
+
+    const discount = await this.discountForDraft(db, facts.priorityGroupIds)
+    const next: NewDebit[] = []
+    let newBase = 0n
+    let newSurcharge = 0n
+    if (schedule) {
+      newBase = schedule.baseTuition
+      next.push({
+        type: LedgerEntryType.BASE_TUITION,
+        amount: newBase,
+        enrollmentId: null,
+        description: `Học phí cố định ${termName(term)} (hồ sơ mới)`,
+      })
+    }
+    for (const row of old) {
+      if (row.type !== LedgerEntryType.SURCHARGE) continue
+      const attempt = row.attemptType ? ATTEMPT_LABEL[row.attemptType] : 'Học lại'
+      next.push({
+        type: LedgerEntryType.SURCHARGE,
+        amount: row.amount,
+        enrollmentId: row.enrollmentId,
+        description: `Phụ thu ${row.courseCode ?? ''} (${attempt})`,
+      })
+      newSurcharge += row.amount
+    }
+    const newDiscount = next.reduce(
+      (sum, row) => sum + (discount ? discountOf(row.amount, discount.rate) : 0n),
+      0n,
+    )
+
+    const bm7 = await this.bm7(db, student.id, term.id)
+    const afterBm7 = projectAfter(
+      bm7,
+      oldBase + oldSurcharge,
+      oldDiscount,
+      newBase + newSurcharge,
+      newDiscount,
+    )
+    return {
+      term,
+      reason,
+      old,
+      next,
+      discount,
+      before,
+      after: {
+        baseTuition: Number(newBase),
+        surcharge: Number(newSurcharge),
+        discount: Number(newDiscount),
+        netAmount: afterBm7.netAmount,
+        outstandingAmount: afterBm7.outstandingAmount,
+      },
     }
   }
 
@@ -436,7 +907,7 @@ export class TuitionService {
           const course = entry.enrollment?.course
           const section = entry.enrollment?.section
           const description = entry.description ?? ''
-          const group = description.includes('Tính lại') ? 'Tính lại học phí' : null
+          const group = recalculationGroupOf(description)
           const detail =
             entry.type === LedgerEntryType.BASE_TUITION
               ? `Khoá ${student.cohort.code.replace(/^K/, '')} · ${student.trainingSystem.code}`
