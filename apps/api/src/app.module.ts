@@ -1,3 +1,4 @@
+import { BullModule } from '@nestjs/bullmq'
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common'
 import { APP_FILTER, APP_GUARD, Reflector } from '@nestjs/core'
 
@@ -10,6 +11,8 @@ import { FinanceModule } from './finance/finance.module'
 import { HealthController } from './health/health.controller'
 import { MonitoringModule } from './monitoring/monitoring.module'
 import { PaymentModule } from './payments/payment.module'
+import { registrationConnection } from './payments/sepay.service'
+import { SepayModule } from './payments/sepay.worker'
 import { PrismaModule } from './prisma/prisma.module'
 import { RegistrationModule } from './registration/registration.module'
 import { StudentsModule } from './students/students.module'
@@ -19,6 +22,7 @@ import { TuitionModule } from './tuition/tuition.module'
 @Module({
   imports: [
     PrismaModule,
+    BullModule.forRoot({ connection: registrationConnection() }),
     AuthModule,
     StudentsModule,
     RegistrationModule,
@@ -28,6 +32,7 @@ import { TuitionModule } from './tuition/tuition.module'
     FinanceModule,
     TuitionModule,
     PaymentModule,
+    SepayModule,
   ],
   controllers: [HealthController],
   providers: [

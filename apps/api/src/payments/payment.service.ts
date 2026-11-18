@@ -170,9 +170,11 @@ export class PaymentService {
     studentCode: string
     termCode: string
     amount: bigint
-    collectedById: number
+    collectedById?: number | null
     note: string | null
     paidAt?: Date
+    channel?: PaymentChannel
+    bankTransactionId?: number
   }): Promise<PaymentResult> {
     return this.prisma.$transaction(async (db) => {
       const student = await db.student.findUnique({
@@ -207,10 +209,11 @@ export class PaymentService {
           receiptNumber: number,
           studentId: student.id,
           termId: term.id,
-          channel: PaymentChannel.COUNTER,
+          channel: args.channel ?? PaymentChannel.COUNTER,
           amount: args.amount,
           paidAt,
-          collectedById: args.collectedById,
+          bankTransactionId: args.bankTransactionId ?? null,
+          collectedById: args.collectedById ?? null,
           note: args.note,
         },
       })
@@ -222,7 +225,7 @@ export class PaymentService {
           direction: LedgerDirection.CREDIT,
           amount: args.amount,
           receiptId: receipt.id,
-          createdById: args.collectedById,
+          createdById: args.collectedById ?? null,
           createdAt: paidAt,
           description: `Phiếu thu ${number}`,
         },

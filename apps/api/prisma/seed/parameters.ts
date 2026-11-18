@@ -1,4 +1,5 @@
 import type { Prisma } from '../../src/generated/prisma/client'
+import { SEPAY_API_KEY, SEPAY_API_KEY_PARAMETER } from '../../src/payments/sepay.validation'
 import type { Db } from './lib'
 
 /** Account that receives tuition transfers (A.7); SePay webhooks for any other account are rejected (TT-04). */
@@ -31,6 +32,11 @@ const PARAMETERS: [key: string, value: Prisma.InputJsonValue, description: strin
   ['registration.transactionMaxWaitMs', 2_000, 'maxWait transaction đăng ký'],
   ['auth.sessionAbsoluteTtlHours', 8, 'Thời hạn session tuyệt đối'],
   ['payment.bankAccount', BANK_ACCOUNT, 'Tài khoản nhận học phí (giá trị giả cho môi trường dev)'],
+  [
+    SEPAY_API_KEY_PARAMETER,
+    SEPAY_API_KEY,
+    'Khoá API SePay cho webhook (giá trị giả cho môi trường dev)',
+  ],
 ]
 
 export async function seedParameters(db: Db, updatedById: number) {

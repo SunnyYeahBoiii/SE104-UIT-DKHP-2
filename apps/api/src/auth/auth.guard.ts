@@ -36,7 +36,14 @@ export function parseCookies(header: string | undefined): Record<string, string>
   return cookies
 }
 
-const PUBLIC_PATHS = new Set(['/api/health', '/api/auth/login', '/health', '/auth/login'])
+const PUBLIC_PATHS = new Set([
+  '/api/health',
+  '/api/auth/login',
+  '/api/webhooks/sepay',
+  '/health',
+  '/auth/login',
+  '/webhooks/sepay',
+])
 
 @Injectable()
 export class AuthGuard implements CanActivate {

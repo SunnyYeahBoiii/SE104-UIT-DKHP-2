@@ -1,7 +1,9 @@
 'use client'
 
-import { Check, Copy, Info } from 'lucide-react'
+import { Check, Copy, Download, Info } from 'lucide-react'
+import Image from 'next/image'
 import Link from 'next/link'
+import QRCode from 'qrcode'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { Banner, Button, Card } from '@/components/ui'
@@ -12,18 +14,28 @@ import {
   groupLedger,
   money,
   signedMoney,
+  tuitionQrPayload,
   tuitionStatus,
   type LedgerRow,
   type TuitionOverview,
 } from '@/lib/tuition'
 import type { ReceiptDetail } from '@/lib/receipt'
 
-function CopyField({ label, value }: { label: string; value: string }) {
+function CopyField({
+  label,
+  value,
+  onCopied,
+}: {
+  label: string
+  value: string
+  onCopied?: () => void
+}) {
   const [copied, setCopied] = useState(false)
   const copy = async () => {
     await navigator.clipboard?.writeText(value)
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1500)
+    onCopied?.()
   }
   return (
     <div className="flex min-h-14 items-center justify-between gap-3 border-b border-line py-2 last:border-0">
@@ -100,27 +112,44 @@ export function TuitionPage() {
   const [loading, setLoading] = useState(true)
   const [now, setNow] = useState(() => Date.now())
   const [receipts, setReceipts] = useState<ReceiptDetail[]>([])
+  const [qr, setQr] = useState('')
+  const [waiting, setWaiting] = useState(false)
+  const [arrived, setArrived] = useState<number | null>(null)
   const latest = useRef(0)
+  const baseline = useRef(0)
 
-  const load = useCallback(async (code?: string) => {
+  const load = useCallback(async (code?: string): Promise<TuitionOverview | null> => {
     const request = ++latest.current
     setLoading(true)
+    let result: TuitionOverview | null = null
     try {
       const query = code ? `?termCode=${encodeURIComponent(code)}` : ''
       const next = await api<TuitionOverview>(`/tuition${query}`)
-      if (request !== latest.current) return
+      result = next
+      if (request !== latest.current) return null
       setData(next)
       setTermCode(next.selected?.code ?? '')
       setError('')
     } catch (cause) {
-      if (request !== latest.current) return
+      if (request !== latest.current) return null
       setError(
         cause instanceof ApiError ? cause.message : 'Không tải được học phí. Vui lòng thử lại.',
       )
     } finally {
       if (request === latest.current) setLoading(false)
     }
+    return result
   }, [])
+
+  const refresh = useCallback(
+    async (code?: string) => {
+      const next = await load(code)
+      const nextReceipts = await api<ReceiptDetail[]>('/tuition/receipts')
+      setReceipts(nextReceipts)
+      return { next, receipts: nextReceipts }
+    },
+    [load],
+  )
 
   useEffect(() => {
     void Promise.resolve().then(() => load())
@@ -136,6 +165,60 @@ export function TuitionPage() {
       .then(setReceipts)
       .catch(() => undefined)
   }, [])
+
+  useEffect(() => {
+    const payment = data?.selected
+    let active = true
+    void Promise.resolve()
+      .then(async () => {
+        if (!payment || payment.bm7.outstandingAmount <= 0) {
+          if (active) setQr('')
+          return
+        }
+        const url = await QRCode.toDataURL(
+          tuitionQrPayload(payment.payment, payment.bm7.outstandingAmount, payment.paymentCode),
+          { width: 240, margin: 1 },
+        )
+        if (active) setQr(url)
+      })
+      .catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [data])
+
+  const startWaiting = useCallback(() => {
+    const outstanding = data?.selected?.bm7.outstandingAmount ?? 0
+    if (outstanding <= 0) return
+    baseline.current = outstanding
+    setArrived(null)
+    setWaiting(true)
+  }, [data])
+
+  useEffect(() => {
+    if (!waiting) return
+    const timer = window.setInterval(() => {
+      void refresh(termCode)
+        .then(({ next }) => {
+          const current = next?.selected?.bm7.outstandingAmount
+          if (current !== undefined && current < baseline.current) {
+            setArrived(baseline.current - current)
+            setWaiting(false)
+          }
+        })
+        .catch(() => undefined)
+    }, 5000)
+    return () => window.clearInterval(timer)
+  }, [waiting, termCode, refresh])
+
+  const saveQr = () => {
+    if (!qr) return
+    const link = document.createElement('a')
+    link.href = qr
+    link.download = `QR-${data?.selected?.paymentCode ?? 'hoc-phi'}.png`
+    link.click()
+    startWaiting()
+  }
 
   const selected = data?.selected
   const status = selected ? tuitionStatus(selected.bm7, selected.tuitionDeadline, now) : null
@@ -193,6 +276,8 @@ export function TuitionPage() {
           value={termCode}
           onChange={(event) => {
             setTermCode(event.target.value)
+            setWaiting(false)
+            setArrived(null)
             void load(event.target.value)
           }}
           className="h-12 w-full rounded-sm border border-neutral-200 bg-surface px-3 text-base text-ink"
@@ -269,17 +354,94 @@ export function TuitionPage() {
       </div>
 
       {bm7.outstandingAmount > 0 ? (
-        <Card className="space-y-1">
-          <h2 className="pb-2 text-sm font-semibold text-ink">Cách đóng học phí</h2>
-          <CopyField label="Ngân hàng" value={selected.payment.gateway} />
-          <CopyField label="Số tài khoản" value={selected.payment.accountNumber} />
-          <CopyField label="Chủ tài khoản" value={selected.payment.accountName} />
-          <CopyField label="Số tiền" value={money(bm7.outstandingAmount)} />
-          <CopyField label="Nội dung chuyển khoản" value={selected.paymentCode} />
-          <p className="pt-2 text-xs text-muted">
-            Giữ nguyên nội dung chuyển khoản để hệ thống tự ghi nhận. Có thể chuyển nhiều lần.
-          </p>
-        </Card>
+        <div data-testid="tuition-qr-card" className="space-y-3">
+          <Card className="space-y-3">
+            <h2 className="text-sm font-semibold text-ink">Cách đóng học phí</h2>
+            <div className="flex flex-col items-center gap-3">
+              {qr ? (
+                <Image
+                  data-testid="tuition-qr-image"
+                  src={qr}
+                  alt="QR học phí"
+                  width={240}
+                  height={240}
+                  unoptimized
+                  className="size-60 bg-white p-2"
+                />
+              ) : null}
+              <Button variant="secondary" onClick={saveQr} data-testid="tuition-qr-save">
+                <Download size={18} strokeWidth={1.5} />
+                Lưu ảnh QR
+              </Button>
+            </div>
+            <div className="border-t border-line pt-1">
+              <CopyField
+                label="Ngân hàng"
+                value={selected.payment.gateway}
+                onCopied={startWaiting}
+              />
+              <CopyField
+                label="Số tài khoản"
+                value={selected.payment.accountNumber}
+                onCopied={startWaiting}
+              />
+              <CopyField
+                label="Chủ tài khoản"
+                value={selected.payment.accountName}
+                onCopied={startWaiting}
+              />
+              <CopyField
+                label="Số tiền"
+                value={money(bm7.outstandingAmount)}
+                onCopied={startWaiting}
+              />
+              <CopyField
+                label="Nội dung chuyển khoản"
+                value={selected.paymentCode}
+                onCopied={startWaiting}
+              />
+            </div>
+            <p className="text-xs text-muted">
+              Giữ nguyên nội dung chuyển khoản để hệ thống tự ghi nhận. Có thể chuyển nhiều lần.
+            </p>
+          </Card>
+        </div>
+      ) : null}
+      {waiting ? (
+        <div data-testid="tuition-waiting">
+          <Banner
+            tone="info"
+            action={
+              <details>
+                <summary className="cursor-pointer underline">
+                  Tôi đã chuyển nhưng chưa thấy ghi nhận
+                </summary>
+                <p className="pt-1 text-xs">
+                  Liên hệ Phòng Tài vụ, cung cấp nội dung chuyển khoản để được hỗ trợ.
+                </p>
+              </details>
+            }
+          >
+            Đang chờ tiền về… Hệ thống sẽ tự kiểm tra định kỳ.
+          </Banner>
+        </div>
+      ) : null}
+      {arrived !== null ? (
+        <div data-testid="tuition-arrived">
+          <Banner
+            tone="info"
+            action={
+              <Button variant="link" onClick={() => void refresh(termCode)}>
+                Xem phiếu thu
+              </Button>
+            }
+          >
+            Đã nhận {money(arrived)}. {receipts[0] ? `Phiếu thu ${receipts[0].number}. ` : ''}
+            {bm7.outstandingAmount <= 0 && data.student.email
+              ? `Email xác nhận sẽ gửi tới ${data.student.email}.`
+              : ''}
+          </Banner>
+        </div>
       ) : null}
 
       <section data-testid="tuition-ledger">
