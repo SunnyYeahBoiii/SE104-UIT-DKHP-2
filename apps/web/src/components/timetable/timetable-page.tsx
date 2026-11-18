@@ -1,6 +1,7 @@
 'use client'
 
 import { Download, FileSpreadsheet, UploadCloud } from 'lucide-react'
+import Link from 'next/link'
 import { useEffect, useRef, useState, type ChangeEvent, type DragEvent } from 'react'
 
 import { ScheduleGrid } from '@/components/timetable/schedule-grid'
@@ -757,6 +758,13 @@ export function TimetablePage() {
                           <Button variant="link" onClick={() => openSection(section)}>
                             Sửa
                           </Button>
+                          <Link
+                            aria-label={`BB01 ${section.code}`}
+                            href={`/staff/sections/${section.code}?term=${code}`}
+                            className="ml-3 text-sm text-brand-600 underline"
+                          >
+                            BB01
+                          </Link>
                         </td>
                       </tr>
                     ))}
