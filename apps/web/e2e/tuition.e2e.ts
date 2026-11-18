@@ -30,6 +30,8 @@ test('sinh viên còn nợ: tóm tắt BM7, hạn đóng và sổ cái mới nh�
   await expect(rows).toHaveCount(1)
   await expect(page.getByText('Nội dung chuyển khoản', { exact: true })).toBeVisible()
   await expect(page.getByText('HP2452000120262')).toBeVisible()
+  await expect(page.getByTestId('tuition-qr-image')).toBeVisible()
+  await expect(page.getByTestId('tuition-qr-save')).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360)
 })
 
@@ -61,4 +63,92 @@ test('quá hạn còn nợ: banner cảnh báo với hạn đóng của HK1', as
   await page.getByTestId('tuition-term-select').selectOption('20261')
   await expect(page.getByTestId('tuition-overdue')).toContainText('quá hạn')
   await expect(page.getByTestId('tuition-overdue')).toContainText('31/10/2026')
+})
+
+test('TT-03: đã đóng đủ thì không còn QR', async ({ page }) => {
+  await login(page, '24520002')
+  await expect(page.getByTestId('tuition-qr-card')).toHaveCount(0)
+  await expect(page.getByTestId('tuition-qr-image')).toHaveCount(0)
+})
+
+test('B.2 H3: sao chép thì hiện Đang chờ tiền về và tự kiểm tra định kỳ', async ({ page }) => {
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  await login(page, '24520001')
+  await page.getByRole('button', { name: 'Sao chép Nội dung chuyển khoản' }).click()
+  await expect(page.getByTestId('tuition-waiting')).toContainText('Đang chờ tiền về')
+  await expect(page.getByText('Tôi đã chuyển nhưng chưa thấy ghi nhận')).toBeVisible()
+})
+
+test('B.2 H3: lưu ảnh QR rồi tự chuyển cảnh khi tiền về', async ({ page }) => {
+  await login(page, '24520001')
+  const image = page.getByTestId('tuition-qr-image')
+  await expect(image).toBeVisible()
+  expect((await image.getAttribute('src'))?.startsWith('data:image/png;base64,')).toBe(true)
+
+  type OverviewResponse = {
+    selected?: {
+      bm7: { outstandingAmount: number; paidAmount: number; netAmount: number }
+    }
+  }
+  type ReceiptRow = {
+    id: number
+    number: string
+    studentCode: string
+    studentName: string
+    cohortCode: string
+    trainingSystemCode: string
+    termCode: string
+    termName: string
+    channel: string
+    amount: number
+    amountInWords: string
+    paidAt: string
+    collector: string | null
+    note: string | null
+  }
+  let paid = false
+  await page.route(/\/api\/tuition(?:\?|$)/, async (route) => {
+    const response = await route.fetch()
+    const json = (await response.json()) as OverviewResponse
+    if (paid && json.selected) {
+      json.selected.bm7.outstandingAmount = 0
+      json.selected.bm7.paidAmount = json.selected.bm7.netAmount
+    }
+    await route.fulfill({ response, json })
+  })
+  await page.route('**/api/tuition/receipts', async (route) => {
+    const response = await route.fetch()
+    const json = (await response.json()) as ReceiptRow[]
+    if (paid && !json.some((receipt) => receipt.number === 'PT-20262-00012')) {
+      json.unshift({
+        id: 999_999,
+        number: 'PT-20262-00012',
+        studentCode: '24520001',
+        studentName: 'Nguyễn Minh An',
+        cohortCode: 'K19',
+        trainingSystemCode: 'CQUI',
+        termCode: '20262',
+        termName: 'HK2 2026–2027',
+        channel: 'BANK_TRANSFER',
+        amount: 15_000_000,
+        amountInWords: 'Mười lăm triệu đồng chẵn',
+        paidAt: '2027-01-06T02:15:00.000Z',
+        collector: null,
+        note: null,
+      })
+    }
+    await route.fulfill({ response, json })
+  })
+
+  const download = page.waitForEvent('download')
+  await page.getByTestId('tuition-qr-save').click()
+  expect((await download).suggestedFilename()).toBe('QR-HP2452000120262.png')
+  await expect(page.getByTestId('tuition-waiting')).toContainText('Đang chờ tiền về')
+
+  paid = true
+  await expect(page.getByTestId('tuition-settled')).toBeVisible({ timeout: 12_000 })
+  await expect(page.getByTestId('tuition-qr-card')).toHaveCount(0)
+  await expect(page.getByTestId('tuition-arrived')).toContainText('15.000.000 đ')
+  await expect(page.getByTestId('tuition-arrived')).toContainText('PT-20262-00012')
+  await expect(page.getByRole('button', { name: 'Xem phiếu thu' })).toBeVisible()
 })

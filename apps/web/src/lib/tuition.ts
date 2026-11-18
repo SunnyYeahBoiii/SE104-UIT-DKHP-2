@@ -60,6 +60,12 @@ export type TuitionOverview = {
   } | null
 }
 
+export type QrPayment = { gateway: string; accountNumber: string; accountName: string }
+
+export function tuitionQrPayload(payment: QrPayment, amount: number, paymentCode: string): string {
+  return `${payment.gateway}|${payment.accountNumber}|${payment.accountName}|${amount}|${paymentCode}`
+}
+
 export type TuitionStatus = 'OVERDUE' | 'OUTSTANDING' | 'SETTLED' | 'CREDIT'
 
 export const money = (value: number): string => `${new Intl.NumberFormat('vi-VN').format(value)} đ`

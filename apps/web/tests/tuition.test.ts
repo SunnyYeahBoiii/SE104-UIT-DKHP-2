@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'bun:test'
 
-import { groupLedger, money, signedMoney, tuitionStatus, type LedgerRow } from '../src/lib/tuition'
+import {
+  groupLedger,
+  money,
+  signedMoney,
+  tuitionQrPayload,
+  tuitionStatus,
+  type LedgerRow,
+} from '../src/lib/tuition'
 
 const deadline = '2027-02-28T10:00:00.000Z'
 const bm7 = (outstanding: number) => ({
@@ -29,6 +36,16 @@ describe('tuition: A.4 money and status formatting', () => {
     expect(tuitionStatus(bm7(-500_000), deadline, Date.parse('2027-03-01T03:00:00Z'))).toBe(
       'CREDIT',
     )
+  })
+
+  it('TT-02/TT-03: QR content carries the receiving account, locked amount and payment code', () => {
+    expect(
+      tuitionQrPayload(
+        { gateway: 'MBBank', accountNumber: '0000000000', accountName: 'UIT' },
+        15_000_000,
+        'HP2452000120262',
+      ),
+    ).toBe('MBBank|0000000000|UIT|15000000|HP2452000120262')
   })
 
   it('groups recalculation rows under one heading and leaves normal rows alone', () => {
