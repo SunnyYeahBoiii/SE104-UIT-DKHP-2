@@ -14,3 +14,6 @@ CONTEXT.md
 # generated code
 apps/api/src/generated/
 apps/api/prisma/migrations/
+
+# local tool config (not tracked)
+opencode.json

@@ -34,10 +34,25 @@ export class ApiError extends Error {
   }
 }
 
+export function csrfToken(): string {
+  if (typeof document === 'undefined') return ''
+  const entry = document.cookie.split('; ').find((part) => part.startsWith('dkhp_csrf='))
+  return entry ? decodeURIComponent(entry.slice('dkhp_csrf='.length)) : ''
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method ?? 'GET').toUpperCase()
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    ...(init?.headers as Record<string, string> | undefined),
+  }
+  if (!['GET', 'HEAD'].includes(method)) {
+    const token = csrfToken()
+    if (token) headers['x-csrf-token'] = token
+  }
   const response = await fetch(`/api${path}`, {
     ...init,
-    headers: { 'content-type': 'application/json', ...init?.headers },
+    headers,
   })
   const body = (await response.json().catch(() => ({}))) as Record<string, unknown>
   if (!response.ok) {
