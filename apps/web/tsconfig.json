@@ -3,7 +3,8 @@
   "compilerOptions": {
     "paths": {
       "@/*": ["./src/*"]
-    }
+    },
+    "types": ["node", "bun"]
   },
   "include": [
     "next-env.d.ts",

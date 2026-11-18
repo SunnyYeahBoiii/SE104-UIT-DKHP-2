@@ -8,9 +8,12 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint . --max-warnings=0",
-    "typecheck": "next typegen && tsc --noEmit"
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "bun test",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
+    "lucide-react": "^0",
     "next": "16.3.7",
     "react": "19.2.8",
     "react-dom": "19.2.8"
@@ -18,12 +21,14 @@
   "devDependencies": {
     "@dkhp/eslint-config": "workspace:*",
     "@dkhp/typescript-config": "workspace:*",
+    "@playwright/test": "^1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^24",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9.39.5",
     "tailwindcss": "^4",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "@types/bun": "^1.4.2"
   }
 }

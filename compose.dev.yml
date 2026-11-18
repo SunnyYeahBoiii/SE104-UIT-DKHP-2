@@ -18,6 +18,12 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+  # ADR-0013: opaque sessions. Database index 7 is reserved for this dev stack.
+  redis:
+    image: redis:8-alpine
+    command: ['redis-server', '--appendonly', 'no']
+    ports:
+      - '6379:6379'
 
 volumes:
   postgres-data:
