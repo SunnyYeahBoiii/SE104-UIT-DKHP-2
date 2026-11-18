@@ -42,17 +42,25 @@ export function RegistrationMonitor() {
   const [error, setError] = useState('')
 
   useEffect(() => {
+    let alive = true
     void api<{ terms: TermView[] }>('/academics/terms')
       .then((response) => {
+        if (!alive) return
         const open = response.terms.filter((term) => term.phase !== 'CLOSED')
         setTerms(open)
         const preferred =
           open.find((term) => term.phase === 'REGISTRATION' || term.phase === 'ADJUSTMENT') ??
           open.find((term) => term.phase === 'IN_PROGRESS') ??
           open[0]
-        if (preferred) setTermCode(preferred.code)
+        // Only a default: a late response must never override a term the user already picked.
+        if (preferred) setTermCode((current) => current || preferred.code)
       })
-      .catch((cause: Error) => setError(cause.message))
+      .catch((cause: Error) => {
+        if (alive) setError(cause.message)
+      })
+    return () => {
+      alive = false
+    }
   }, [])
 
   useEffect(() => {
