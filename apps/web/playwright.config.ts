@@ -16,6 +16,7 @@ export default defineConfig({
   webServer: [
     {
       command: 'bun run --cwd ../api start',
+      env: { DKHP_REGISTRATION_NOW: '2027-01-06T10:00:00+07:00' },
       url: 'http://127.0.0.1:3001/api/health',
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,

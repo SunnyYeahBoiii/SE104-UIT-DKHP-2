@@ -18,7 +18,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-  # ADR-0013: opaque sessions. Database index 7 is reserved for this dev stack.
+  # ADR-0013: opaque sessions (DB 7), other suites (DB 2/9) and registration idempotency/rate limits (DB 14).
   redis:
     image: redis:8-alpine
     command: ['redis-server', '--appendonly', 'no']
