@@ -618,6 +618,8 @@ model BankTransaction {
   referenceCode    String?               @map("reference_code")
   amount           BigInt
   status           BankTransactionStatus @default(PENDING)
+  /// Mandatory reason when the finance office dismisses a non-tuition transfer (TT-07).
+  ignoreReason     String?               @map("ignore_reason")
   matchedStudentId Int?                  @map("matched_student_id")
   matchedTermId    Int?                  @map("matched_term_id")
   assignedById     Int?                  @map("assigned_by_id")

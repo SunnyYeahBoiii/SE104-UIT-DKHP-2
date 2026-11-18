@@ -51,12 +51,30 @@ export function StaffShell({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(false)
   const [query, setQuery] = useState('')
   const [term, setTerm] = useState('20262')
+  const [unmatched, setUnmatched] = useState(0)
 
   useEffect(() => {
     void api<{ user: AuthUser }>('/auth/me')
       .then(({ user }) => setUser(user))
       .catch(() => undefined)
   }, [])
+
+  useEffect(() => {
+    if (user?.activeRole !== 'FINANCE_OFFICE') return
+    let active = true
+    const load = () =>
+      void api<{ unmatchedCount: number }>('/bank-transactions/count')
+        .then(({ unmatchedCount }) => {
+          if (active) setUnmatched(unmatchedCount)
+        })
+        .catch(() => undefined)
+    load()
+    window.addEventListener('dkhp:transactions-changed', load)
+    return () => {
+      active = false
+      window.removeEventListener('dkhp:transactions-changed', load)
+    }
+  }, [user?.activeRole, pathname])
 
   const role = user?.activeRole
   const items = role && role !== 'STUDENT' ? NAV[role] : []
@@ -100,6 +118,14 @@ export function StaffShell({ children }: { children: ReactNode }) {
                 >
                   <Icon size={20} strokeWidth={1.5} className="shrink-0" />
                   {!collapsed ? label : null}
+                  {href === '/staff/bank' && unmatched > 0 ? (
+                    <span
+                      data-testid="sidebar-unmatched-badge"
+                      className="ml-auto rounded-full bg-warning-50 px-2 py-0.5 text-xs font-semibold text-warning-700"
+                    >
+                      {unmatched}
+                    </span>
+                  ) : null}
                 </Link>
               </li>
             ))}

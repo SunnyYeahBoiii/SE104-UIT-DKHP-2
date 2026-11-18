@@ -4,6 +4,7 @@ import {
   LedgerDirection,
   LedgerEntryType,
   PaymentChannel,
+  Prisma,
   type AcademicYear,
   type Cohort,
   type Receipt,
@@ -175,8 +176,10 @@ export class PaymentService {
     paidAt?: Date
     channel?: PaymentChannel
     bankTransactionId?: number
+    /** Shared transaction: the caller has already locked the bank transaction (TT-07). */
+    db?: Prisma.TransactionClient
   }): Promise<PaymentResult> {
-    return this.prisma.$transaction(async (db) => {
+    const post = async (db: Prisma.TransactionClient): Promise<PaymentResult> => {
       const student = await db.student.findUnique({
         where: { studentCode: args.studentCode },
         include: { user: { select: { email: true } }, cohort: true, trainingSystem: true },
@@ -260,7 +263,8 @@ export class PaymentService {
         settled,
         creditBalance: Math.max(0, -after.outstandingAmount),
       }
-    })
+    }
+    return args.db ? post(args.db) : this.prisma.$transaction(post)
   }
 
   async shiftReceipts(collectorId: number) {
