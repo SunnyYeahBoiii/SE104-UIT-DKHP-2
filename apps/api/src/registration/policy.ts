@@ -1,7 +1,7 @@
 import { AttemptType } from '../generated/prisma/enums'
 
 /** DK-10: only the rules owned by this slice, in the order the full rule would check them. */
-export const REGISTRATION_RULES = ['DK-02', 'DK-03', 'DK-19', 'DK-04', 'DK-09'] as const
+export const REGISTRATION_RULES = ['DK-02', 'DK-03', 'DK-19', 'DK-04', 'DK-11', 'DK-09'] as const
 export type RegistrationRule = (typeof REGISTRATION_RULES)[number]
 
 export function firstRule(rules: readonly RegistrationRule[]): RegistrationRule | null {
@@ -21,6 +21,10 @@ export function ruleMessage(rule: RegistrationRule, detail: RuleDetail = {}): st
       return `Lớp ${detail.code ?? ''} thuộc hệ ${detail.system ?? ''}, bạn thuộc hệ ${detail.studentSystem ?? ''}. Chọn lớp cùng hệ đào tạo của môn này.`
     case 'DK-04':
       return `Môn ${detail.courseCode ?? ''} hoặc môn tương đương đã có trong phiếu. Mở phiếu để huỷ dòng cũ rồi đăng ký lại.`
+    case 'DK-11':
+      return detail.parentFailed
+        ? `Lớp LT cha không đăng ký được (${detail.parentCode ?? ''}). Đăng ký lại lớp LT cha rồi chọn nhóm thực hành.`
+        : `Nhóm thực hành ${detail.code ?? ''} không thuộc lớp LT bạn đang đăng ký. Chọn nhóm của lớp LT trong phiếu, hoặc đăng ký lớp LT cha cùng lượt.`
     case 'DK-09':
       return `Lớp ${detail.code ?? ''} vừa đầy. Chọn lớp khác của môn này còn chỗ.`
   }
@@ -36,6 +40,8 @@ export function ruleExit(rule: RegistrationRule, detail: RuleDetail = {}): strin
       return 'Chọn lớp cùng hệ đào tạo'
     case 'DK-04':
       return 'Mở phiếu để huỷ dòng cũ'
+    case 'DK-11':
+      return detail.parentFailed ? 'Đăng ký lại lớp LT cha' : 'Chọn nhóm của lớp LT trong phiếu'
     case 'DK-09':
       return 'Chọn lớp khác còn chỗ'
   }
@@ -59,7 +65,11 @@ export function effectiveResult(
 ): EffectiveResult {
   const keys = new Set(equivalenceIds)
   const relevant = attempts
-    .filter((attempt) => keys.has(attempt.equivalenceId ?? attempt.courseId))
+    .filter(
+      (attempt) =>
+        keys.has(attempt.courseId) ||
+        (attempt.equivalenceId !== null && keys.has(attempt.equivalenceId)),
+    )
     .sort((left, right) => right.order - left.order)
   const passed = relevant.find((attempt) => attempt.score !== null && attempt.score >= 5)
   if (passed) return 'PASSED'

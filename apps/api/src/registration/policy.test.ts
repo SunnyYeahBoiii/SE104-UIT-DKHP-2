@@ -5,6 +5,7 @@ import {
   attemptTypeOf,
   effectiveResult,
   firstRule,
+  REGISTRATION_RULES,
   ruleExit,
   ruleMessage,
   type AttemptLike,
@@ -20,18 +21,22 @@ const attempt = (courseId: number, score: number | null, order: number): Attempt
 describe('DK-10: rule order and error copy', () => {
   it('returns the first failing rule in DK-10 order, not the first in the input', () => {
     expect(firstRule(['DK-09', 'DK-04', 'DK-02'])).toBe('DK-02')
-    expect(firstRule(['DK-09', 'DK-04'])).toBe('DK-04')
+    expect(firstRule(['DK-09', 'DK-11', 'DK-04'])).toBe('DK-04')
+    expect(firstRule(['DK-09', 'DK-11'])).toBe('DK-11')
     expect(firstRule([])).toBeNull()
   })
 
   it('gives every error a reason and a way out', () => {
-    for (const rule of ['DK-02', 'DK-03', 'DK-19', 'DK-04', 'DK-09'] as const) {
+    for (const rule of REGISTRATION_RULES) {
       expect(ruleMessage(rule, { code: 'SE104.P21', courseCode: 'SE104' }).length).toBeGreaterThan(
         20,
       )
       expect(ruleExit(rule).length).toBeGreaterThan(4)
       expect(ruleMessage(rule)).not.toMatch(/^\s*[A-Z]{2}-\d+\s*$/)
     }
+    expect(ruleMessage('DK-11', { parentFailed: 'true', parentCode: 'SE104.P21' })).toContain(
+      'Lớp LT cha không đăng ký được',
+    )
   })
 })
 

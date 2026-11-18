@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'bun:test'
 
-import { DAY_LABELS, formatCountdown, sectionDays, type Section } from '../src/lib/registration'
+import {
+  DAY_LABELS,
+  formatCountdown,
+  isPracticeGroup,
+  retakeSplitHint,
+  sectionDays,
+  type Section,
+} from '../src/lib/registration'
 
 describe('registration view helpers', () => {
   it('renders a countdown with days only when needed', () => {
@@ -17,5 +24,21 @@ describe('registration view helpers', () => {
     const section = { days: [2, 6] } as unknown as Section
     expect(sectionDays(section)).toBe('T2 · T6')
     expect(sectionDays({ days: [] } as unknown as Section)).toBe('Không có lịch cố định')
+  })
+
+  it('marks practice groups and hints at each retake-split case', () => {
+    const group = { parentSectionId: 7, attemptType: 'FIRST' } as unknown as Section
+    const theory = {
+      parentSectionId: null,
+      practiceMode: 'SCHEDULED',
+      attemptType: 'IMPROVEMENT',
+    } as unknown as Section
+    expect(isPracticeGroup(group)).toBe(true)
+    expect(isPracticeGroup(theory)).toBe(false)
+    expect(retakeSplitHint([theory, group])).toContain('Đạt phần lý thuyết')
+    expect(retakeSplitHint([{ ...group, attemptType: 'IMPROVEMENT' }])).toContain(
+      'Đạt phần thực hành',
+    )
+    expect(retakeSplitHint([group])).toBeNull()
   })
 })
