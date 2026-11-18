@@ -11,6 +11,8 @@ import { RegistrationIdempotency } from '../src/registration/idempotency'
 import { RegistrationClock, RegistrationService } from '../src/registration/registration.service'
 import { PrismaService } from '../src/prisma/prisma.service'
 import { DEMO_NOW } from '../prisma/seed/scenarios'
+import { ReceivingAccountService } from '../src/finance/receiving-account.service'
+import { TuitionService } from '../src/tuition/tuition.service'
 
 class FakeClock extends RegistrationClock {
   override now(): Date {
@@ -56,7 +58,12 @@ describe('practice sections and retake split (integration: Postgres dkhp_w47 + R
     await prisma.onModuleInit()
     idempotency = new RegistrationIdempotency()
     redis = new Redis('redis://localhost:6379/15', { maxRetriesPerRequest: 1 })
-    service = new RegistrationService(prisma, new FakeClock(), idempotency)
+    service = new RegistrationService(
+      prisma,
+      new FakeClock(),
+      idempotency,
+      new TuitionService(prisma, new ReceivingAccountService(prisma)),
+    )
     termId = (await prisma.term.findUniqueOrThrow({ where: { termCode: '20262' } })).id
     const cqui = await prisma.trainingSystem.findUniqueOrThrow({ where: { code: 'CQUI' } })
     const k19 = await prisma.cohort.findUniqueOrThrow({ where: { code: 'K19' } })
@@ -210,6 +217,24 @@ describe('practice sections and retake split (integration: Postgres dkhp_w47 + R
       where: { studentId: { in: studentIds } },
       select: { id: true },
     })
+    // #51 posts surcharges on register; the ledger is append-only (ADR-0004), so the fixture
+    // cleanup lifts the trigger the same way the tuition suite does.
+    if (studentIds.length > 0) {
+      const ids = studentIds.join(',')
+      await prisma.$executeRawUnsafe(
+        'ALTER TABLE ledger_entry DISABLE TRIGGER ledger_entry_append_only',
+      )
+      try {
+        await prisma.$executeRawUnsafe(
+          `UPDATE ledger_entry SET related_entry_id = NULL WHERE student_id IN (${ids})`,
+        )
+        await prisma.ledgerEntry.deleteMany({ where: { studentId: { in: studentIds } } })
+      } finally {
+        await prisma.$executeRawUnsafe(
+          'ALTER TABLE ledger_entry ENABLE TRIGGER ledger_entry_append_only',
+        )
+      }
+    }
     await prisma.enrollment.deleteMany({
       where: { formId: { in: forms.map((form) => form.id) } },
     })

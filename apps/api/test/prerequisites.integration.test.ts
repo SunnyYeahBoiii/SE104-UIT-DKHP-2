@@ -15,6 +15,8 @@ import {
 } from '../src/registration/prerequisite-review.service'
 import { RegistrationClock, RegistrationService } from '../src/registration/registration.service'
 import { DEMO_NOW } from '../prisma/seed/scenarios'
+import { ReceivingAccountService } from '../src/finance/receiving-account.service'
+import { TuitionService } from '../src/tuition/tuition.service'
 
 const suffix = randomUUID().slice(0, 6)
 const vn = (date: string, time = '00:00') => new Date(`${date}T${time}:00+07:00`)
@@ -117,7 +119,12 @@ describe('prerequisites & conditional registration (integration: dkhp_w48 + Redi
     await prisma.onModuleInit()
     idempotency = new RegistrationIdempotency()
     redis = new Redis('redis://localhost:6379/14', { maxRetriesPerRequest: 1 })
-    service = new RegistrationService(prisma, new FakeClock(), idempotency)
+    service = new RegistrationService(
+      prisma,
+      new FakeClock(),
+      idempotency,
+      new TuitionService(prisma, new ReceivingAccountService(prisma)),
+    )
     review = new PrerequisiteReviewService(prisma, new FakeBaseClock(), service)
     openTermId = (await prisma.term.findUniqueOrThrow({ where: { termCode: '20262' } })).id
     closedTermId = (await prisma.term.findUniqueOrThrow({ where: { termCode: '20261' } })).id

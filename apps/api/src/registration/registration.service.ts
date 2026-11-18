@@ -11,8 +11,6 @@ import {
   AttemptType,
   CourseType,
   EnrollmentStatus,
-  LedgerDirection,
-  LedgerEntryType,
   Prisma,
   type AcademicYear,
   type Course,
