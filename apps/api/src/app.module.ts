@@ -5,12 +5,13 @@ import { AuthGuard } from './auth/auth.guard'
 import { AuthModule } from './auth/auth.module'
 import { AllExceptionsFilter } from './common/all-exceptions.filter'
 import { RequestIdMiddleware } from './common/request-id.middleware'
+import { FinanceModule } from './finance/finance.module'
 import { HealthController } from './health/health.controller'
 import { PrismaModule } from './prisma/prisma.module'
 import { StudentsModule } from './students/students.module'
 
 @Module({
-  imports: [PrismaModule, AuthModule, StudentsModule],
+  imports: [PrismaModule, AuthModule, StudentsModule, FinanceModule],
   controllers: [HealthController],
   providers: [
     Reflector,
