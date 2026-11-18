@@ -43,3 +43,25 @@ test('sinh viên: đăng nhập → đăng ký 2 lớp → thấy phiếu → hu
   await expect(page.getByTestId('cancelled-SE121.P21')).toBeVisible()
   await expect(page.getByTestId('active-CE119.P21.1')).toBeVisible()
 })
+
+test('sinh viên: lọc Không trùng lịch và in phiếu BM5', async ({ page }) => {
+  await page.goto('/login')
+  await page.getByLabel('MSSV hoặc mã cán bộ').fill('24520001')
+  await page.getByLabel('Mật khẩu', { exact: true }).fill(PASSWORD)
+  await page.getByRole('button', { name: 'Đăng nhập' }).click()
+  await expect(page).toHaveURL(/\/student$/)
+
+  await page.goto('/student/registration')
+  const noClash = page.getByRole('button', { name: 'Không trùng lịch' })
+  await noClash.click()
+  await expect(noClash).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByTestId('section-SE104.P21')).toBeVisible()
+  await expect(page.getByTestId('section-SE121.P21')).toBeVisible()
+
+  await page.getByRole('button', { name: 'In phiếu đăng ký (BM5)' }).click()
+  const form = page.getByTestId('bm5-form')
+  await expect(form).toBeVisible()
+  await expect(page.getByTestId('bm5-student')).toHaveText('24520001')
+  await expect(page.getByTestId('bm5-row-SE104.P21')).toBeVisible()
+  await expect(page.getByTestId('bm5-print')).toBeVisible()
+})

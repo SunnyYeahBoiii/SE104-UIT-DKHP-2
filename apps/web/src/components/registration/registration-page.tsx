@@ -1,10 +1,12 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Check, Clock3, Search, X } from 'lucide-react'
+import { Check, Clock3, Printer, Search, X } from 'lucide-react'
+import Link from 'next/link'
 
 import { Banner, Button, Card, Input } from '@/components/ui'
 import { api } from '@/lib/auth'
+import { clashLabel, sectionClash } from '@/lib/schedule'
 import {
   ATTEMPT_LABELS,
   DAY_LABELS,
@@ -22,6 +24,7 @@ type Filters = {
   day: number | null
   courseType: string
   reserved: boolean
+  noClash: boolean
 }
 
 const EMPTY_FILTERS: Filters = {
@@ -30,6 +33,7 @@ const EMPTY_FILTERS: Filters = {
   day: null,
   courseType: '',
   reserved: false,
+  noClash: false,
 }
 
 function queryOf(filters: Filters): string {
@@ -39,6 +43,7 @@ function queryOf(filters: Filters): string {
   if (filters.day) params.set('day', String(filters.day))
   if (filters.courseType) params.set('courseType', filters.courseType)
   if (filters.reserved) params.set('reserved', 'true')
+  if (filters.noClash) params.set('noClash', 'true')
   const query = params.toString()
   return query ? `?${query}` : ''
 }
@@ -53,6 +58,7 @@ export function RegistrationPage() {
   const [cancelTarget, setCancelTarget] = useState<FormRow | null>(null)
   const [cancelling, setCancelling] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  const [showBm5, setShowBm5] = useState(false)
   const [reloadToken, setReloadToken] = useState(0)
   const [nowMs, setNowMs] = useState(0)
   const keyRef = useRef<string | null>(null)
@@ -156,6 +162,18 @@ export function RegistrationPage() {
     )
 
   const full = (section: (typeof data.sections)[number]) => section.remaining === 0
+  const clashFor = (section: (typeof data.sections)[number]) =>
+    section.clash ??
+    sectionClash(
+      section,
+      selectedSections.filter((item) => item.id !== section.id),
+    )
+  const revealClash = (code: string) => {
+    document.querySelector(`[data-testid="section-${CSS.escape(code)}"]`)?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center',
+    })
+  }
 
   return (
     <div className="space-y-5 pb-32">
@@ -246,6 +264,14 @@ export function RegistrationPage() {
             </button>
             <button
               type="button"
+              aria-pressed={filters.noClash}
+              onClick={() => setFilters({ ...filters, noClash: !filters.noClash })}
+              className={`min-h-11 rounded-sm border px-3 text-sm font-medium ${filters.noClash ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-line bg-surface text-muted'}`}
+            >
+              Không trùng lịch
+            </button>
+            <button
+              type="button"
               aria-pressed={filters.courseType === 'THEORY'}
               onClick={() =>
                 setFilters({
@@ -302,6 +328,7 @@ export function RegistrationPage() {
           <ul className="mt-4 space-y-3">
             {data.sections.map((section) => {
               const chosen = selected.includes(section.id)
+              const clash = clashFor(section)
               const disabled = !canWrite || full(section) || section.registered
               const percent = section.capacity
                 ? Math.round((section.enrolledCount / section.capacity) * 100)
@@ -310,7 +337,7 @@ export function RegistrationPage() {
                 <li
                   key={section.id}
                   data-testid={`section-${section.code}`}
-                  className={`rounded-md border p-4 ${chosen ? 'border-brand-500 bg-brand-50' : 'border-line bg-surface'}`}
+                  className={`rounded-md border p-4 ${clash ? 'border-danger-600 bg-danger-50' : chosen ? 'border-brand-500 bg-brand-50' : 'border-line bg-surface'}`}
                 >
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
@@ -344,6 +371,14 @@ export function RegistrationPage() {
                       Còn {section.remaining}/{section.capacity}
                     </span>
                   </div>
+                  {clash ? (
+                    <p
+                      data-testid={`clash-${section.code}`}
+                      className="mt-2 text-xs font-semibold text-danger-700"
+                    >
+                      {clashLabel(clash)}
+                    </p>
+                  ) : null}
                   {full(section) || section.registered ? (
                     <p className="mt-2 text-xs font-semibold text-warning-700">
                       {full(section) ? 'Đã đầy' : 'Đã đăng ký · ' + section.code}
@@ -351,14 +386,16 @@ export function RegistrationPage() {
                   ) : null}
                   <button
                     type="button"
-                    aria-label={`Chọn lớp ${section.code}`}
+                    aria-label={
+                      clash ? `Xem lớp trùng ${section.code}` : `Chọn lớp ${section.code}`
+                    }
                     aria-pressed={chosen}
-                    disabled={disabled}
-                    onClick={() => toggle(section.id)}
-                    className={`mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-sm text-sm font-semibold ${chosen ? 'bg-brand-700 text-white' : 'border border-brand-200 bg-surface text-brand-700'} disabled:cursor-not-allowed disabled:opacity-50`}
+                    disabled={disabled && !clash}
+                    onClick={() => (clash ? revealClash(clash.withCode) : toggle(section.id))}
+                    className={`mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-sm text-sm font-semibold ${clash ? 'border border-danger-600 bg-surface text-danger-700' : chosen ? 'bg-brand-700 text-white' : 'border border-brand-200 bg-surface text-brand-700'} disabled:cursor-not-allowed disabled:opacity-50`}
                   >
                     {chosen ? <Check size={16} /> : null}
-                    {chosen ? 'Đã chọn' : 'Chọn lớp'}
+                    {clash ? 'Xem lớp trùng' : chosen ? 'Đã chọn' : 'Chọn lớp'}
                   </button>
                 </li>
               )
@@ -428,6 +465,18 @@ export function RegistrationPage() {
             ))}
           </ul>
         </details>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Link
+            href="/student/schedule?scope=registering"
+            data-testid="preview-schedule"
+            className="inline-flex min-h-11 items-center justify-center rounded-sm border border-brand-200 bg-surface px-4 text-sm font-semibold text-brand-700"
+          >
+            Xem thời khoá biểu
+          </Link>
+          <Button variant="secondary" data-testid="print-bm5" onClick={() => setShowBm5(true)}>
+            <Printer size={16} /> In phiếu đăng ký (BM5)
+          </Button>
+        </div>
       </Card>
 
       {selected.length > 0 ? (
@@ -474,6 +523,95 @@ export function RegistrationPage() {
                 Xác nhận huỷ
               </Button>
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showBm5 ? (
+        <div className="fixed inset-0 z-40 overflow-y-auto bg-black/40 p-4 sm:p-8">
+          <div className="mx-auto max-w-3xl rounded-md bg-surface p-5 shadow-lg">
+            <div className="print-hide flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setShowBm5(false)}>
+                Đóng
+              </Button>
+              <Button data-testid="bm5-print" onClick={() => window.print()}>
+                <Printer size={16} /> In BM5
+              </Button>
+            </div>
+            <article data-testid="bm5-form" className="print-area mt-4 bg-white p-6 text-ink">
+              <h2 className="text-center text-lg font-bold uppercase">
+                BM5: Phiếu đăng ký học phần
+              </h2>
+              <table className="mt-4 w-full border-collapse text-sm">
+                <tbody>
+                  <tr>
+                    <td className="py-1 font-medium">Số phiếu:</td>
+                    <td data-testid="bm5-number" className="py-1 font-mono">
+                      {data.form.id ?? '—'}
+                    </td>
+                    <td className="py-1 font-medium">Ngày lập:</td>
+                    <td data-testid="bm5-date" className="py-1">
+                      {new Date(Date.parse(data.now)).toLocaleDateString('vi-VN')}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="py-1 font-medium">Mã số sinh viên:</td>
+                    <td data-testid="bm5-student" className="py-1 font-mono">
+                      {data.student.studentCode}
+                    </td>
+                    <td className="py-1 font-medium">Học kỳ:</td>
+                    <td data-testid="bm5-term" className="py-1">
+                      {data.term?.name ?? '—'}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="py-1 font-medium">Năm học:</td>
+                    <td data-testid="bm5-year" className="py-1" colSpan={3}>
+                      {data.term?.name.match(/\d{4}–\d{4}/)?.[0] ?? '—'}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <table className="mt-4 w-full border-collapse border border-neutral-400 text-sm">
+                <thead>
+                  <tr className="bg-neutral-100">
+                    <th className="border border-neutral-400 px-2 py-2">Stt</th>
+                    <th className="border border-neutral-400 px-2 py-2 text-left">Môn học</th>
+                    <th className="border border-neutral-400 px-2 py-2">Số tín chỉ</th>
+                    <th className="border border-neutral-400 px-2 py-2 text-left">Lớp học phần</th>
+                    <th className="border border-neutral-400 px-2 py-2 text-left">Hình thức học</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.form.rows.map((row, index) => (
+                    <tr key={row.id} data-testid={`bm5-row-${row.sectionCode}`}>
+                      <td className="border border-neutral-400 px-2 py-2 text-center">
+                        {index + 1}
+                      </td>
+                      <td className="border border-neutral-400 px-2 py-2">{row.courseName}</td>
+                      <td className="border border-neutral-400 px-2 py-2 text-center">
+                        {row.credits}
+                      </td>
+                      <td className="border border-neutral-400 px-2 py-2 font-mono">
+                        {row.sectionCode}
+                      </td>
+                      <td className="border border-neutral-400 px-2 py-2">
+                        {(['FIRST', 'RETAKE', 'IMPROVEMENT'] as const)
+                          .map(
+                            (type) =>
+                              `${type === row.attemptType ? '☑' : '□'} ${ATTEMPT_LABELS[type]}`,
+                          )
+                          .join(' ')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="mt-4 text-sm font-semibold">
+                Tổng: {data.form.totalCredits}/{data.form.maxCredits} tín chỉ
+              </p>
+              <p className="mt-8 text-right text-sm">Người lập phiếu · Sinh viên</p>
+            </article>
           </div>
         </div>
       ) : null}
