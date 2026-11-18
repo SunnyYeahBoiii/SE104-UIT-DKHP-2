@@ -1,6 +1,7 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common'
 import { APP_FILTER, APP_GUARD, Reflector } from '@nestjs/core'
 
+import { AcademicsModule } from './academics/academics.module'
 import { AuthGuard } from './auth/auth.guard'
 import { AuthModule } from './auth/auth.module'
 import { AllExceptionsFilter } from './common/all-exceptions.filter'
@@ -10,7 +11,7 @@ import { PrismaModule } from './prisma/prisma.module'
 import { StudentsModule } from './students/students.module'
 
 @Module({
-  imports: [PrismaModule, AuthModule, StudentsModule],
+  imports: [PrismaModule, AuthModule, StudentsModule, AcademicsModule],
   controllers: [HealthController],
   providers: [
     Reflector,
