@@ -126,7 +126,12 @@ export function StaffShell({ children }: { children: ReactNode }) {
             action="/staff/students"
             onSubmit={(event) => {
               event.preventDefault()
-              router.push(`/staff/students?q=${encodeURIComponent(query)}`)
+              const code = query.trim()
+              router.push(
+                /^\d{8}$/.test(code)
+                  ? `/staff/students/${code}`
+                  : `/staff/students?q=${encodeURIComponent(code)}`,
+              )
             }}
           >
             <Search size={18} className="text-muted" />
