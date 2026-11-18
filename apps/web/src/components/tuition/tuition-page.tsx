@@ -1,6 +1,7 @@
 'use client'
 
 import { Check, Copy, Info } from 'lucide-react'
+import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { Banner, Button, Card } from '@/components/ui'
@@ -15,6 +16,7 @@ import {
   type LedgerRow,
   type TuitionOverview,
 } from '@/lib/tuition'
+import type { ReceiptDetail } from '@/lib/receipt'
 
 function CopyField({ label, value }: { label: string; value: string }) {
   const [copied, setCopied] = useState(false)
@@ -97,6 +99,7 @@ export function TuitionPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [now, setNow] = useState(() => Date.now())
+  const [receipts, setReceipts] = useState<ReceiptDetail[]>([])
   const latest = useRef(0)
 
   const load = useCallback(async (code?: string) => {
@@ -126,6 +129,12 @@ export function TuitionPage() {
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    void api<ReceiptDetail[]>('/tuition/receipts')
+      .then(setReceipts)
+      .catch(() => undefined)
   }, [])
 
   const selected = data?.selected
@@ -293,6 +302,32 @@ export function TuitionPage() {
           {selected.ledger.length === 0 ? (
             <p className="py-4 text-sm text-muted">Học kỳ này chưa có khoản nào.</p>
           ) : null}
+        </Card>
+      </section>
+
+      <section data-testid="tuition-receipts">
+        <h2 className="mb-2 text-sm font-semibold text-ink">Phiếu thu của tôi</h2>
+        <Card className="divide-y divide-line p-0">
+          {receipts.length === 0 ? (
+            <p className="px-4 py-4 text-sm text-muted">Chưa có phiếu thu nào.</p>
+          ) : (
+            receipts.map((receipt) => (
+              <Link
+                key={receipt.id}
+                data-testid={`tuition-receipt-${receipt.number}`}
+                href={`/student/receipts/${encodeURIComponent(receipt.number)}`}
+                className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-brand-50"
+              >
+                <span>
+                  <span className="block font-mono text-sm text-ink">{receipt.number}</span>
+                  <span className="block text-xs text-muted">
+                    {receipt.termName} · {dateTime(receipt.paidAt)}
+                  </span>
+                </span>
+                <span className="font-semibold tabular-nums">{money(receipt.amount)}</span>
+              </Link>
+            ))
+          )}
         </Card>
       </section>
     </div>

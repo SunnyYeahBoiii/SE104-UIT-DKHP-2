@@ -95,6 +95,12 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.receipt-80 {
+  max-width: 80mm;
+  font-size: 9pt;
+  background: #fff;
+}
+
 /* BM5 (QĐ05.2) and BB02 (NFR-12): print only the chosen sheet, never the app shell. */
 @media print {
   @page {
@@ -127,6 +133,22 @@ body {
 
   .print-hide {
     display: none !important;
+  }
+
+  /* BM6 overrides the shared A4 sheet: the component injects the A5/80mm @page size. */
+  .print-area.receipt-print {
+    position: static;
+    width: auto;
+    max-width: none;
+  }
+
+  .receipt-80 {
+    font-size: 9pt !important;
+    background: #fff !important;
+  }
+
+  .receipt-80 .receipt-signature {
+    display: none;
   }
 }
 
