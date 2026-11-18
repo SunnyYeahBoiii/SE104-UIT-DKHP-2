@@ -31,6 +31,8 @@ class EarlyClock extends RegistrationClock {
   }
 }
 
+type FixtureSection = { id: number; code: string }
+
 type Failure = { response?: { code?: string; message?: string } }
 const failureOf = async (promise: Promise<unknown>): Promise<Failure> => {
   try {
@@ -63,6 +65,18 @@ describe('registration (integration: Postgres dkhp_w46 + Redis 14, demo clock 06
   let clcUser: number
   let k20User: number
   let k18User: number
+  let clashA: FixtureSection
+  let clashB: FixtureSection
+  let clashC: FixtureSection
+  let clashD: FixtureSection
+  let creditX: FixtureSection
+  let creditY: FixtureSection
+  let clashRaceP: FixtureSection
+  let clashRaceQ: FixtureSection
+  let overCreditSectionId: number
+  const extraCourseIds: number[] = []
+  const extraOfferedIds: number[] = []
+  const extraSectionIds: number[] = []
   const raceUsers: number[] = []
   const createdUserIds: number[] = []
   const createdStudentIds: number[] = []
@@ -130,6 +144,63 @@ describe('registration (integration: Postgres dkhp_w46 + Redis 14, demo clock 06
       })
     ).id
 
+    type MeetingSeed = {
+      dayOfWeek: number
+      startSlot: number
+      endSlot: number
+      room: string
+      weeks: number
+    }
+    const weekly = (dayOfWeek: number, startSlot: number, endSlot: number, weeks?: number[]) => ({
+      dayOfWeek,
+      startSlot,
+      endSlot,
+      room: 'TEST',
+      weeks: weeks ? weeks.reduce((mask, week) => mask | (1 << (week - 1)), 0) : 0b111111111111111,
+    })
+    // One course per section: DK-04 (same course) must not mask DK-07/DK-08.
+    const addSection = async (
+      courseCode: string,
+      credits: number,
+      meetings: MeetingSeed[] = [],
+    ): Promise<FixtureSection> => {
+      const created = await prisma.course.create({
+        data: {
+          code: courseCode,
+          name: `Môn thử nghiệm ${courseCode}`,
+          type: 'THEORY',
+          totalPeriods: credits * 15,
+          credits,
+        },
+      })
+      extraCourseIds.push(created.id)
+      const offering = await prisma.offeredCourse.create({
+        data: { termId, courseId: created.id, credits },
+      })
+      extraOfferedIds.push(offering.id)
+      const row = await prisma.courseSection.create({
+        data: {
+          offeredCourseId: offering.id,
+          trainingSystemId: cquiId,
+          code: `${courseCode}.1`,
+          capacity: 50,
+          meetings: { create: meetings },
+        },
+      })
+      extraSectionIds.push(row.id)
+      return { id: row.id, code: row.code }
+    }
+    clashA = await addSection('CLA', 3, [weekly(2, 1, 3, [1, 3, 5])])
+    clashB = await addSection('CLB', 3, [weekly(2, 2, 4, [3, 7])])
+    clashC = await addSection('CLC', 3, [weekly(2, 1, 3, [2, 4, 6])])
+    clashD = await addSection('CLD', 3)
+    const overCredit = await addSection('CRH', 25, [weekly(5, 1, 3)])
+    creditX = await addSection('RCX', 13, [weekly(6, 1, 3)])
+    creditY = await addSection('RCY', 13, [weekly(7, 1, 3)])
+    clashRaceP = await addSection('CCP', 3, [weekly(4, 1, 3)])
+    clashRaceQ = await addSection('CCQ', 3, [weekly(4, 1, 3)])
+    overCreditSectionId = overCredit.id
+
     const mains = ['24520001', '24520014', '25520010', '23520003']
     for (const studentCode of mains) {
       const student = await prisma.student.findUniqueOrThrow({ where: { studentCode } })
@@ -165,11 +236,13 @@ describe('registration (integration: Postgres dkhp_w46 + Redis 14, demo clock 06
   })
 
   afterAll(async () => {
-    const sectionIds = [raceSectionId, batchSectionId, reservedSectionId]
+    const sectionIds = [raceSectionId, batchSectionId, reservedSectionId, ...extraSectionIds]
     await prisma.enrollment.deleteMany({ where: { sectionId: { in: sectionIds } } })
     await prisma.registrationForm.deleteMany({ where: { studentId: { in: createdStudentIds } } })
     await prisma.courseSection.deleteMany({ where: { id: { in: sectionIds } } })
+    await prisma.offeredCourse.deleteMany({ where: { id: { in: extraOfferedIds } } })
     await prisma.offeredCourse.delete({ where: { id: offeredId } })
+    await prisma.course.deleteMany({ where: { id: { in: extraCourseIds } } })
     await prisma.course.delete({ where: { id: testCourseId } })
     await prisma.student.deleteMany({ where: { id: { in: createdStudentIds } } })
     await prisma.user.deleteMany({ where: { id: { in: createdUserIds } } })
@@ -343,6 +416,91 @@ describe('registration (integration: Postgres dkhp_w46 + Redis 14, demo clock 06
     expect(rows).toBe(50)
     expect(section.enrolledCount).toBe(50)
     expect(winners).toBe(rows)
+  })
+
+  it('DK-07: clash names the other class with a way out; alternating and unscheduled classes pass', async () => {
+    const user = raceUsers[110]!
+    const first = await service.register(user, key(), { sectionIds: [clashA.id] })
+    expect(first.results[0]?.ok).toBe(true)
+    const aCode = clashA.code
+
+    const clashResult = await service.register(user, key(), { sectionIds: [clashB.id] })
+    expect(clashResult.results[0]?.code).toBe('DK-07')
+    expect(clashResult.results[0]?.message).toContain(aCode)
+    expect(clashResult.results[0]?.exit).toBe(`Huỷ lớp ${aCode}`)
+
+    expect((await service.register(user, key(), { sectionIds: [clashC.id] })).results[0]?.ok).toBe(
+      true,
+    )
+    expect((await service.register(user, key(), { sectionIds: [clashD.id] })).results[0]?.ok).toBe(
+      true,
+    )
+    const view = await service.overview(user, {})
+    expect(view.sections.find((item) => item.id === clashB.id)?.clash?.withCode).toBe(aCode)
+    expect(view.sections.find((item) => item.id === clashA.id)?.meetings[0]?.weeks).toBeGreaterThan(
+      0,
+    )
+    const filtered = await service.overview(user, { noClash: true })
+    expect(filtered.sections.some((item) => item.id === clashB.id)).toBe(false)
+    expect(filtered.sections.some((item) => item.id === clashC.id)).toBe(true)
+  })
+
+  it('DK-08: a class above the term cap is refused with the remaining credits', async () => {
+    const result = await service.register(raceUsers[111]!, key(), {
+      sectionIds: [overCreditSectionId],
+    })
+    expect(result.results[0]?.code).toBe('DK-08')
+    expect(result.results[0]?.message).toContain('24 tín chỉ')
+    expect(result.results[0]?.exit).toBe('Mở phiếu để huỷ bớt')
+  })
+
+  it('NFR-03: parallel requests from one student break neither the credit cap nor the clash rule', async () => {
+    const creditUser = raceUsers[112]!
+    const credits = await Promise.all([
+      service.register(creditUser, key(), { sectionIds: [creditX.id] }),
+      service.register(creditUser, key(), { sectionIds: [creditY.id] }),
+    ])
+    expect(
+      credits.map((item) => item.results[0]?.code).filter((code) => code === undefined),
+    ).toHaveLength(1)
+    expect(credits.map((item) => item.results[0]?.code)).toContain('DK-08')
+    const creditView = await service.overview(creditUser, {})
+    expect(creditView.form.totalCredits).toBeLessThanOrEqual(creditView.form.maxCredits)
+
+    const clashUser = raceUsers[113]!
+    const clashes = await Promise.all([
+      service.register(clashUser, key(), { sectionIds: [clashRaceP.id] }),
+      service.register(clashUser, key(), { sectionIds: [clashRaceQ.id] }),
+    ])
+    expect(
+      clashes.map((item) => item.results[0]?.code).filter((code) => code === undefined),
+    ).toHaveLength(1)
+    expect(clashes.map((item) => item.results[0]?.code)).toContain('DK-07')
+    const rows = await prisma.enrollment.count({
+      where: {
+        form: { studentId: createdStudentIds[113] },
+        sectionId: { in: [clashRaceP.id, clashRaceQ.id] },
+      },
+    })
+    expect(rows).toBe(1)
+  })
+
+  it('QĐ05.3/B.4.3: the timetable API returns dated meetings and a separate unscheduled section', async () => {
+    const preview = await service.timetable(raceUsers[110]!, 'registering')
+    expect(preview.term?.code).toBe('20262')
+    expect(preview.term?.weekCount).toBeGreaterThanOrEqual(5)
+    const a = preview.meetings.find((item) => item.sectionCode === clashA.code)
+    expect(a?.dates).toHaveLength(3)
+    expect(a?.dates[0]).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(a?.dates).not.toContain('2027-01-12')
+    expect(preview.unscheduled.map((item) => item.sectionCode)).toContain(clashD.code)
+
+    const inProgressUser = (
+      await prisma.student.findUniqueOrThrow({ where: { studentCode: '24520003' } })
+    ).userId
+    const current = await service.timetable(inProgressUser, 'current')
+    expect(current.term?.code).toBe('20261')
+    expect(current.meetings.length).toBeGreaterThan(0)
   })
 
   it('HTTP: a student can read the page, must send an idempotency key, and cannot change a section', async () => {

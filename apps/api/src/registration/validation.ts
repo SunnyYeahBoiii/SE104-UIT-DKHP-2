@@ -23,6 +23,7 @@ export type SectionFilters = {
   day?: number
   courseType?: CourseType
   reserved?: boolean
+  noClash?: boolean
 }
 
 function queryText(value: unknown): string | undefined {
@@ -46,5 +47,14 @@ export function sectionFilters(query: Record<string, unknown>): SectionFilters {
     day,
     courseType,
     reserved: query.reserved === 'true',
+    noClash: query.noClash === 'true',
   }
+}
+
+export type TimetableScope = 'current' | 'registering'
+
+export function timetableScope(value: unknown): TimetableScope {
+  if (value === 'current' || value === 'registering') return value
+  if (value === undefined || value === '') return 'registering'
+  invalid('Chế độ xem lịch không hợp lệ.', 'scope')
 }

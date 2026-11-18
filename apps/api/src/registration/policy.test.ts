@@ -5,6 +5,7 @@ import {
   attemptTypeOf,
   effectiveResult,
   firstRule,
+  remainingCredits,
   ruleExit,
   ruleMessage,
   type AttemptLike,
@@ -25,13 +26,21 @@ describe('DK-10: rule order and error copy', () => {
   })
 
   it('gives every error a reason and a way out', () => {
-    for (const rule of ['DK-02', 'DK-03', 'DK-19', 'DK-04', 'DK-09'] as const) {
+    for (const rule of ['DK-02', 'DK-03', 'DK-19', 'DK-04', 'DK-07', 'DK-08', 'DK-09'] as const) {
       expect(ruleMessage(rule, { code: 'SE104.P21', courseCode: 'SE104' }).length).toBeGreaterThan(
         20,
       )
       expect(ruleExit(rule).length).toBeGreaterThan(4)
       expect(ruleMessage(rule)).not.toMatch(/^\s*[A-Z]{2}-\d+\s*$/)
     }
+  })
+})
+
+describe('DK-08: term credit cap', () => {
+  it('uses the summer cap of 12 and reports the credits still available', () => {
+    expect(remainingCredits(12, 10, 3)).toBe(-1)
+    expect(remainingCredits(12, 10, 2)).toBe(0)
+    expect(remainingCredits(24, 21, 3)).toBe(0)
   })
 })
 
