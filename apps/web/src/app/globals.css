@@ -130,6 +130,36 @@ body {
   }
 }
 
+/* D.5: BM7 is A4 landscape; the column header repeats on every printed page. */
+@page bm7 {
+  size: A4 landscape;
+  margin: 12mm;
+}
+
+.bm7-sheet {
+  page: bm7;
+}
+
+@media print {
+  .bm7-sheet {
+    position: static !important;
+    inset: auto !important;
+    break-after: page;
+  }
+
+  .bm7-sheet:last-child {
+    break-after: auto;
+  }
+
+  .bm7-sheet thead {
+    display: table-header-group;
+  }
+
+  .bm7-sheet tr {
+    break-inside: avoid;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

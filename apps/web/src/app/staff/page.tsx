@@ -1,5 +1,5 @@
-import { StaffOverview } from '@/components/monitoring/staff-overview'
+import { StaffHome } from '@/components/staff-home'
 
-export default function StaffHome() {
-  return <StaffOverview />
+export default function StaffHomePage() {
+  return <StaffHome />
 }
