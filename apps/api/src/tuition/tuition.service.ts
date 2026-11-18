@@ -134,7 +134,7 @@ export type TuitionOverview = {
   } | null
 }
 
-type Totals = {
+export type LedgerTotals = {
   debits: bigint
   credits: bigint
   charges: bigint
@@ -173,6 +173,59 @@ export type RecalculationPlan = {
   discount: { rate: number; name: string } | null
   before: BeforeAfterRow
   after: BeforeAfterRow
+}
+
+/** HP-09: the one fold used by the student portal and by the finance office's BM7 report. */
+export function ledgerTotals(
+  rows: readonly { type: LedgerEntryType; direction: LedgerDirection; amount: bigint }[],
+): LedgerTotals {
+  const totals: LedgerTotals = {
+    debits: 0n,
+    credits: 0n,
+    charges: 0n,
+    chargeReversals: 0n,
+    discountCredits: 0n,
+    discountReversals: 0n,
+    carriedOut: 0n,
+    paid: 0n,
+  }
+  for (const row of rows) {
+    if (row.direction === LedgerDirection.DEBIT) {
+      totals.debits += row.amount
+      if (row.type === LedgerEntryType.BASE_TUITION || row.type === LedgerEntryType.SURCHARGE)
+        totals.charges += row.amount
+      if (row.type === LedgerEntryType.DISCOUNT_REVERSAL) totals.discountReversals += row.amount
+      if (row.type === LedgerEntryType.BALANCE_CARRY_OUT) totals.carriedOut += row.amount
+    } else {
+      totals.credits += row.amount
+      if (row.type === LedgerEntryType.DISCOUNT) totals.discountCredits += row.amount
+      if (
+        row.type === LedgerEntryType.BASE_TUITION_REVERSAL ||
+        row.type === LedgerEntryType.SURCHARGE_REVERSAL
+      )
+        totals.chargeReversals += row.amount
+      if (row.type === LedgerEntryType.PAYMENT || row.type === LedgerEntryType.BALANCE_CARRY_IN)
+        totals.paid += row.amount
+    }
+  }
+  return totals
+}
+
+/**
+ * HP-09/ADR-0004: append-only reversals cancel their originals, so gross counts charges net of
+ * reversals plus any credit balance carried out; discount is net of its reversal; paid is receipts
+ * plus carried-in balance. Gross − discount − paid always equals Σdebit − Σcredit.
+ */
+export function bm7FromTotals(totals: LedgerTotals): Bm7 {
+  const gross = totals.charges - totals.chargeReversals + totals.carriedOut
+  const discount = totals.discountCredits - totals.discountReversals
+  return {
+    grossAmount: Number(gross),
+    discountAmount: Number(discount),
+    netAmount: Number(gross - discount),
+    paidAmount: Number(totals.paid),
+    outstandingAmount: Number(gross - discount - totals.paid),
+  }
 }
 
 const ATTEMPT_LABEL: Record<AttemptType, string> = {
@@ -397,41 +450,12 @@ export class TuitionService {
     })
   }
 
-  private async totals(db: Db, studentId: number, termId: number): Promise<Totals> {
+  private async totals(db: Db, studentId: number, termId: number): Promise<LedgerTotals> {
     const rows = await db.ledgerEntry.findMany({
       where: { studentId, termId },
       select: { type: true, direction: true, amount: true },
     })
-    const totals: Totals = {
-      debits: 0n,
-      credits: 0n,
-      charges: 0n,
-      chargeReversals: 0n,
-      discountCredits: 0n,
-      discountReversals: 0n,
-      carriedOut: 0n,
-      paid: 0n,
-    }
-    for (const row of rows) {
-      if (row.direction === LedgerDirection.DEBIT) {
-        totals.debits += row.amount
-        if (row.type === LedgerEntryType.BASE_TUITION || row.type === LedgerEntryType.SURCHARGE)
-          totals.charges += row.amount
-        if (row.type === LedgerEntryType.DISCOUNT_REVERSAL) totals.discountReversals += row.amount
-        if (row.type === LedgerEntryType.BALANCE_CARRY_OUT) totals.carriedOut += row.amount
-      } else {
-        totals.credits += row.amount
-        if (row.type === LedgerEntryType.DISCOUNT) totals.discountCredits += row.amount
-        if (
-          row.type === LedgerEntryType.BASE_TUITION_REVERSAL ||
-          row.type === LedgerEntryType.SURCHARGE_REVERSAL
-        )
-          totals.chargeReversals += row.amount
-        if (row.type === LedgerEntryType.PAYMENT || row.type === LedgerEntryType.BALANCE_CARRY_IN)
-          totals.paid += row.amount
-      }
-    }
-    return totals
+    return ledgerTotals(rows)
   }
 
   /**
@@ -441,17 +465,7 @@ export class TuitionService {
    * Σdebit − Σcredit, which is what carries and overpayments actually move.
    */
   async bm7(db: Db, studentId: number, termId: number): Promise<Bm7> {
-    const { charges, chargeReversals, discountCredits, discountReversals, carriedOut, paid } =
-      await this.totals(db, studentId, termId)
-    const gross = charges - chargeReversals + carriedOut
-    const discount = discountCredits - discountReversals
-    return {
-      grossAmount: Number(gross),
-      discountAmount: Number(discount),
-      netAmount: Number(gross - discount),
-      paidAmount: Number(paid),
-      outstandingAmount: Number(gross - discount - paid),
-    }
+    return bm7FromTotals(await this.totals(db, studentId, termId))
   }
 
   // ── HP-12 / HS-14: recalculation on a profile edit during an open registration window ──
