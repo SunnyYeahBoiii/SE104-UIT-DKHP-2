@@ -1,5 +1,5 @@
-import { EmptyPlaceholder } from '@/components/placeholder'
+import { TuitionPage } from '@/components/tuition/tuition-page'
 
-export default function TuitionPage() {
-  return <EmptyPlaceholder title="Học phí" />
+export default function Page() {
+  return <TuitionPage />
 }
