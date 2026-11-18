@@ -2,6 +2,7 @@ import { AcademicCatalog } from '@/components/academic-catalog'
 import { Bm7Page } from '@/components/finance/bm7-page'
 import { DebtPage } from '@/components/finance/debt-page'
 import { ReceiptsPage } from '@/components/finance/receipts-page'
+import { ReconciliationPage } from '@/components/finance/reconciliation-page'
 import { CounterPage } from '@/components/counter/counter-page'
 import { FinanceSettings } from '@/components/finance-settings'
 import { RegistrationMonitor } from '@/components/monitoring/registration-monitor'
@@ -36,6 +37,7 @@ export default async function StaffSectionPage({
   if (section === 'fees') return <FinanceSettings />
   if (section === 'debts') return <DebtPage />
   if (section === 'receipts') return <ReceiptsPage />
+  if (section === 'reconciliation') return <ReconciliationPage />
   if (section === 'bm7') return <Bm7Page />
   return <EmptyPlaceholder title={TITLES[section] ?? 'Không tìm thấy trang'} />
 }

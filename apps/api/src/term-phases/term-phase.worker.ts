@@ -4,6 +4,7 @@ import type { Job, Queue } from 'bullmq'
 
 import { Clock } from '../academics/clock'
 import { EmailModule } from '../payments/email.worker'
+import { ReconciliationModule } from '../payments/reconciliation.worker'
 import { SepayModule } from '../payments/sepay.worker'
 import { PrismaModule } from '../prisma/prisma.module'
 import { PrerequisiteReviewModule } from '../registration/prerequisite-review.worker'
@@ -66,6 +67,7 @@ export class TermPhasesModule {}
     PrerequisiteReviewModule,
     EmailModule,
     SepayModule,
+    ReconciliationModule,
   ],
 })
 export class WorkerModule {}

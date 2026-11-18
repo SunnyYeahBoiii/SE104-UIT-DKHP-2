@@ -11,6 +11,7 @@ import {
   SEPAY_API_KEY_PARAMETER,
   sepayPayload,
   verifyApiKey,
+  type SepayPayload,
 } from './sepay.validation'
 
 export const SEPAY_QUEUE = 'sepay'
@@ -65,6 +66,17 @@ export class SepayService {
         400,
       )
 
+    const stored = await this.ingest(input)
+    return { received: true, transactionId: stored.transactionId, duplicate: stored.duplicate }
+  }
+
+  /**
+   * TT-05/TT-08: the one store-and-enqueue path shared by the webhook and daily reconciliation.
+   * The unique sepay_id and the fixed job id mean a late webhook for a backfilled row is a no-op.
+   */
+  async ingest(
+    input: SepayPayload,
+  ): Promise<{ transactionId: number; duplicate: boolean; created: boolean }> {
     try {
       const transaction = await this.prisma.bankTransaction.create({
         data: {
@@ -81,14 +93,14 @@ export class SepayService {
         },
       })
       await this.enqueue(input.sepayId, transaction.id)
-      return { received: true, transactionId: transaction.id, duplicate: false }
+      return { transactionId: transaction.id, duplicate: false, created: true }
     } catch (error) {
       if (!this.isDuplicate(error)) throw error
       const existing = await this.prisma.bankTransaction.findUniqueOrThrow({
         where: { sepayId: input.sepayId },
       })
       await this.enqueue(input.sepayId, existing.id)
-      return { received: true, transactionId: existing.id, duplicate: true }
+      return { transactionId: existing.id, duplicate: true, created: false }
     }
   }
 
