@@ -11,17 +11,21 @@ import {
   AttemptType,
   CourseType,
   EnrollmentStatus,
+  LedgerDirection,
+  LedgerEntryType,
   Prisma,
   type AcademicYear,
   type Course,
   type CourseSection,
   type Enrollment,
+  type RegistrationForm,
   type RegistrationSlot,
   type RegistrationSlotCohort,
   type Term,
 } from '../generated/prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { RegistrationIdempotency } from './idempotency'
+import { prerequisiteCheck, studentAttempts } from './prerequisites'
 import {
   attemptTypeOf,
   effectiveResult,
@@ -81,6 +85,7 @@ export type SectionView = {
   parentSectionId: number | null
   days: number[]
   registered: boolean
+  prerequisite: { state: 'OK' | 'MISSING' | 'CONDITIONAL'; message: string | null }
 }
 
 export type FormRowView = {
@@ -94,6 +99,8 @@ export type FormRowView = {
   status: string
   registeredAt: string
   cancelledAt: string | null
+  pendingPrerequisite: boolean
+  cancellationReason: string | null
 }
 
 export type FormView = {
@@ -305,7 +312,6 @@ export class RegistrationService {
       await this.idempotency.checkRate(userId)
       return this.prisma.$transaction(async (tx) => {
         const student = await this.loadStudent(userId, tx)
-        await tx.$queryRaw`SELECT id FROM student WHERE id = ${student.id} FOR UPDATE`
         const termRecord = await this.openTerm(tx)
         const permission = permissionFor(termRecord, student, this.clock.now())
         if (permission.state !== 'OPEN')
@@ -330,54 +336,144 @@ export class RegistrationService {
         if (enrollment.form.finalizedAt)
           this.fail('FORM_FINALIZED', 'Phiếu đã chốt. Không còn huỷ lớp được.', 409)
 
-        const parentId = enrollment.section.parentSectionId
-        const linked = parentId
-          ? await tx.enrollment.findFirst({
-              where: { formId: enrollment.formId, sectionId: parentId, status: 'REGISTERED' },
-              include: { section: true },
-            })
-          : await tx.enrollment.findFirst({
-              where: {
-                formId: enrollment.formId,
-                status: 'REGISTERED',
-                section: { parentSectionId: enrollment.sectionId },
-              },
-              include: { section: true },
-            })
-        const pair = [enrollment, ...(linked ? [linked] : [])].sort(
-          (left, right) => left.sectionId - right.sectionId,
-        )
-        const at = this.clock.now()
-        for (const item of pair)
-          await tx.enrollment.update({
-            where: { id: item.id },
-            data: { status: EnrollmentStatus.CANCELLED, cancelledAt: at },
-          })
-        for (const item of pair) {
-          const released = await tx.$executeRaw`
-            UPDATE course_section SET enrolled_count = enrolled_count - 1, updated_at = now()
-            WHERE id = ${item.sectionId} AND enrolled_count > 0`
-          if (released !== 1)
-            this.fail('SEAT_RELEASE_FAILED', 'Không trả được chỗ. Vui lòng thử lại.', 409)
-        }
-        const section = await tx.courseSection.findUniqueOrThrow({
-          where: { id: enrollment.sectionId },
-        })
-        return {
-          enrollmentId,
-          sectionId: enrollment.sectionId,
-          sectionCode: enrollment.section.code,
-          status: 'CANCELLED',
-          remaining: section.capacity - section.enrolledCount,
-          cancelledEnrollments: pair.map((item) => ({
-            enrollmentId: item.id,
-            sectionId: item.sectionId,
-            sectionCode: item.section.code,
-            status: 'CANCELLED',
-          })),
-        }
+        return this.cancelActive(tx, enrollment, this.clock.now())
       })
     })
+  }
+
+  /**
+   * DK-06/DK-11/HP-05: the one cancellation path for the student route and the daily job. Locks the
+   * student then the sections in id order (ADR-0005), cancels the companion row both ways, returns
+   * seats and reverses any posted surcharge/discount. The status guard makes a retry a no-op.
+   */
+  async cancelActive(
+    tx: Prisma.TransactionClient,
+    enrollment: Enrollment & { form: RegistrationForm; section: CourseSection },
+    at: Date,
+    reason: string | null = null,
+  ) {
+    await tx.$queryRaw`SELECT id FROM student WHERE id = ${enrollment.form.studentId} FOR UPDATE`
+    const companions = enrollment.section.parentSectionId
+      ? await tx.enrollment.findMany({
+          where: {
+            formId: enrollment.formId,
+            status: 'REGISTERED',
+            id: { not: enrollment.id },
+            section: {
+              OR: [
+                { id: enrollment.section.parentSectionId },
+                { parentSectionId: enrollment.sectionId },
+              ],
+            },
+          },
+          include: { section: true },
+        })
+      : await tx.enrollment.findMany({
+          where: {
+            formId: enrollment.formId,
+            status: 'REGISTERED',
+            id: { not: enrollment.id },
+            section: { parentSectionId: enrollment.sectionId },
+          },
+          include: { section: true },
+        })
+    const rows = [enrollment, ...companions]
+    const sectionIds = [...new Set(rows.map((row) => row.sectionId))].sort((a, b) => a - b)
+    for (const id of sectionIds)
+      await tx.$queryRaw`SELECT id FROM course_section WHERE id = ${id} FOR UPDATE`
+
+    const cancelled: number[] = []
+    for (const row of rows) {
+      const changed = await tx.enrollment.updateMany({
+        where: { id: row.id, status: 'REGISTERED' },
+        data: { status: 'CANCELLED', cancelledAt: at, cancellationReason: reason },
+      })
+      if (changed.count !== 1) continue
+      cancelled.push(row.id)
+      const released = await tx.$executeRaw`
+        UPDATE course_section SET enrolled_count = enrolled_count - 1, updated_at = now()
+        WHERE id = ${row.sectionId} AND enrolled_count > 0`
+      if (released !== 1)
+        this.fail('SEAT_RELEASE_FAILED', 'Không trả được chỗ. Vui lòng thử lại.', 409)
+      await this.reverseFees(tx, row, at)
+    }
+    const section = await tx.courseSection.findUniqueOrThrow({
+      where: { id: enrollment.sectionId },
+    })
+    return {
+      enrollmentId: enrollment.id,
+      sectionId: enrollment.sectionId,
+      sectionCode: enrollment.section.code,
+      cancelledIds: cancelled,
+      status: 'CANCELLED',
+      remaining: section.capacity - section.enrolledCount,
+      cancelledEnrollments: rows
+        .filter((row) => cancelled.includes(row.id))
+        .map((row) => ({
+          enrollmentId: row.id,
+          sectionId: row.sectionId,
+          sectionCode: row.section.code,
+          status: 'CANCELLED',
+        })),
+    }
+  }
+
+  /** ADR-0004: append reversal rows only, and only once per posted surcharge/discount. */
+  private async reverseFees(
+    tx: Prisma.TransactionClient,
+    row: Enrollment & { section: CourseSection },
+    at: Date,
+  ): Promise<void> {
+    const label = row.section.code
+    const debits = await tx.ledgerEntry.findMany({
+      where: { enrollmentId: row.id, type: LedgerEntryType.SURCHARGE },
+      select: { id: true, amount: true, studentId: true, termId: true },
+    })
+    for (const debit of debits) {
+      const existing = await tx.ledgerEntry.findFirst({
+        where: { relatedEntryId: debit.id, type: LedgerEntryType.SURCHARGE_REVERSAL },
+        select: { id: true },
+      })
+      if (existing) continue
+      await tx.ledgerEntry.create({
+        data: {
+          studentId: debit.studentId,
+          termId: debit.termId,
+          type: LedgerEntryType.SURCHARGE_REVERSAL,
+          direction: LedgerDirection.CREDIT,
+          amount: debit.amount,
+          enrollmentId: row.id,
+          relatedEntryId: debit.id,
+          description: `Huỷ ${label}: đảo phụ thu`,
+          createdAt: at,
+        },
+      })
+      const discounts = await tx.ledgerEntry.findMany({
+        where: { relatedEntryId: debit.id, type: LedgerEntryType.DISCOUNT },
+        select: { id: true, amount: true, studentId: true, termId: true, discountRate: true },
+      })
+      for (const discount of discounts) {
+        const reversed = await tx.ledgerEntry.findFirst({
+          where: { relatedEntryId: discount.id, type: LedgerEntryType.DISCOUNT_REVERSAL },
+          select: { id: true },
+        })
+        if (reversed) continue
+        await tx.ledgerEntry.create({
+          data: {
+            studentId: discount.studentId,
+            termId: discount.termId,
+            type: LedgerEntryType.DISCOUNT_REVERSAL,
+            direction: LedgerDirection.DEBIT,
+            amount: discount.amount,
+            discountRate: discount.discountRate,
+            enrollmentId: row.id,
+            relatedEntryId: discount.id,
+            description: `Huỷ ${label}: đảo giảm trừ`,
+            createdAt: at,
+          },
+        })
+      }
+    }
   }
 
   private fail(code: string, message: string, status: number): never {
@@ -476,22 +572,8 @@ export class RegistrationService {
     groupIds: number[],
     db: Prisma.TransactionClient | PrismaService = this.prisma,
   ): Promise<AttemptType> {
-    const attempts = await db.takenCourse.findMany({
-      where: { studentId, courseId: { in: groupIds } },
-      select: { courseId: true, courseScore: true, term: { select: { startDate: true } } },
-    })
-    const scope = course.equivalenceId === null ? groupIds : [...groupIds, course.equivalenceId]
-    return attemptTypeOf(
-      effectiveResult(
-        attempts.map((attempt) => ({
-          courseId: attempt.courseId,
-          equivalenceId: course.equivalenceId,
-          score: attempt.courseScore === null ? null : Number(attempt.courseScore),
-          order: attempt.term.startDate.getTime(),
-        })),
-        scope,
-      ),
-    )
+    const attempts = await studentAttempts(db, studentId)
+    return attemptTypeOf(effectiveResult(attempts, groupIds))
   }
 
   private async rates(db: Prisma.TransactionClient, student: StudentRecord) {
@@ -609,6 +691,14 @@ export class RegistrationService {
         }
 
         const attemptType = await this.attemptFor(context.student.id, course, groupIds, tx)
+        // DK-05 after DK-04, before seat allocation: a missing grade allows a conditional line.
+        const prerequisite = await prerequisiteCheck(tx, context.student.id, course)
+        if (prerequisite.state === 'MISSING')
+          throw new RuleFailure('DK-05', {
+            ...detail,
+            courseCode: course.code,
+            reason: prerequisite.message,
+          })
         // DK-09 last: the conditional UPDATE is the only seat allocator (ADR-0005).
         const won = await tx.$executeRaw`
           UPDATE course_section SET enrolled_count = enrolled_count + 1, updated_at = now()
@@ -626,6 +716,7 @@ export class RegistrationService {
             courseId: course.id,
             status: EnrollmentStatus.REGISTERED,
             attemptType,
+            pendingPrerequisite: prerequisite.state === 'CONDITIONAL',
             credits: section.offeredCourse.credits,
             creditRate: rate,
             surcharge,
@@ -686,6 +777,7 @@ export class RegistrationService {
         parentSectionId: row.parentSectionId,
         days: [...new Set(row.meetings.map((meeting) => meeting.dayOfWeek))].sort(),
         registered: registeredCourses.has(course.code),
+        prerequisite: { state: 'OK', message: null },
       }
       if (filters.q) {
         const needle = filters.q.toLocaleLowerCase('vi')
@@ -703,6 +795,11 @@ export class RegistrationService {
         course,
         await this.equivalenceIds(course),
       )
+      const prerequisite = await prerequisiteCheck(this.prisma, student.id, course)
+      view.prerequisite = {
+        state: prerequisite.state,
+        message: prerequisite.state === 'OK' ? null : prerequisite.message,
+      }
       views.push(view)
     }
     return views
@@ -727,6 +824,8 @@ export class RegistrationService {
       status: enrollment.status,
       registeredAt: enrollment.registeredAt.toISOString(),
       cancelledAt: enrollment.cancelledAt?.toISOString() ?? null,
+      pendingPrerequisite: enrollment.pendingPrerequisite,
+      cancellationReason: enrollment.cancellationReason,
     })
     const rows = row.enrollments.filter((item) => item.status !== 'CANCELLED').map(map)
     const cancelled = row.enrollments.filter((item) => item.status === 'CANCELLED').map(map)

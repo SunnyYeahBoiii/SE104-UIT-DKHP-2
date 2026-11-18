@@ -7,5 +7,6 @@ import { RegistrationIdempotency } from './idempotency'
 @Module({
   controllers: [RegistrationController],
   providers: [RegistrationService, RegistrationClock, RegistrationIdempotency],
+  exports: [RegistrationService],
 })
 export class RegistrationModule {}

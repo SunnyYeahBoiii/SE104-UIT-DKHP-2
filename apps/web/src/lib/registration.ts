@@ -28,6 +28,7 @@ export type Section = {
   parentSectionId: number | null
   days: number[]
   registered: boolean
+  prerequisite: { state: 'OK' | 'MISSING' | 'CONDITIONAL'; message: string | null }
 }
 
 export type FormRow = {
@@ -41,6 +42,8 @@ export type FormRow = {
   status: string
   registeredAt: string
   cancelledAt: string | null
+  pendingPrerequisite: boolean
+  cancellationReason: string | null
 }
 
 export type Form = {

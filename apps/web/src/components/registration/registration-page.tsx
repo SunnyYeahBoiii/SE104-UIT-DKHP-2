@@ -328,7 +328,7 @@ export function RegistrationPage() {
                 <li
                   key={section.id}
                   data-testid={`section-${section.code}`}
-                  className={`rounded-md border p-4 ${group ? 'ml-2 border-l-2 border-brand-200' : ''} ${chosen ? 'border-brand-500 bg-brand-50' : 'border-line bg-surface'}`}
+                  className={`rounded-md border p-4 ${group ? 'ml-2 border-l-2 border-brand-200' : ''} ${chosen ? 'border-brand-500 bg-brand-50' : 'border-line bg-surface'} ${section.prerequisite.state === 'MISSING' ? 'opacity-75' : ''}`}
                 >
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
@@ -355,6 +355,14 @@ export function RegistrationPage() {
                   {section.reservedAdmissionYear ? (
                     <p className="mt-1 text-xs text-muted">
                       Dành cho khoá {section.reservedAdmissionYear}
+                    </p>
+                  ) : null}
+                  {section.prerequisite.message ? (
+                    <p
+                      data-testid={`prerequisite-${section.code}`}
+                      className={`mt-1 text-xs font-semibold ${section.prerequisite.state === 'MISSING' ? 'text-danger-700' : 'text-warning-700'}`}
+                    >
+                      {section.prerequisite.message}
                     </p>
                   ) : null}
                   <div className="mt-3 flex items-center gap-3">
@@ -423,6 +431,14 @@ export function RegistrationPage() {
                   <p className="truncate text-xs text-muted">
                     {row.courseName} · {row.credits} TC · {ATTEMPT_LABELS[row.attemptType]}
                   </p>
+                  {row.pendingPrerequisite ? (
+                    <p
+                      data-testid={`conditional-${row.sectionCode}`}
+                      className="mt-1 rounded-sm bg-warning-50 px-2 py-0.5 text-xs font-semibold text-warning-700"
+                    >
+                      Đăng ký có điều kiện
+                    </p>
+                  ) : null}
                 </div>
                 <Button
                   variant="secondary"
@@ -445,9 +461,19 @@ export function RegistrationPage() {
               <li
                 key={row.id}
                 data-testid={`cancelled-${row.sectionCode}`}
-                className="text-sm text-muted line-through"
+                className="text-sm text-muted"
               >
-                {row.sectionCode} · {row.courseName}
+                <span className="line-through">
+                  {row.sectionCode} · {row.courseName}
+                </span>
+                {row.cancellationReason ? (
+                  <span
+                    data-testid={`cancel-reason-${row.sectionCode}`}
+                    className="ml-2 font-medium text-warning-700"
+                  >
+                    {row.cancellationReason}
+                  </span>
+                ) : null}
               </li>
             ))}
           </ul>

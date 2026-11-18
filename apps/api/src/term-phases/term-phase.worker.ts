@@ -4,6 +4,7 @@ import type { Job, Queue } from 'bullmq'
 
 import { Clock } from '../academics/clock'
 import { PrismaModule } from '../prisma/prisma.module'
+import { PrerequisiteReviewModule } from '../registration/prerequisite-review.worker'
 import {
   NoopTermRegistrationHook,
   TERM_REGISTRATION_HOOK,
@@ -66,6 +67,11 @@ export class TermPhasesModule {}
 
 /** ADR-0007: the worker is the same codebase under a different entrypoint. */
 @Module({
-  imports: [PrismaModule, BullModule.forRoot({ connection: queueConnection() }), TermPhasesModule],
+  imports: [
+    PrismaModule,
+    BullModule.forRoot({ connection: queueConnection() }),
+    TermPhasesModule,
+    PrerequisiteReviewModule,
+  ],
 })
 export class WorkerModule {}
