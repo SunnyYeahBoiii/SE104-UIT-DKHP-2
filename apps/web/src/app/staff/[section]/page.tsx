@@ -1,3 +1,4 @@
+import { AcademicCatalog } from '@/components/academic-catalog'
 import { EmptyPlaceholder } from '@/components/placeholder'
 
 const TITLES: Record<string, string> = {
@@ -21,5 +22,6 @@ export default async function StaffSectionPage({
   params: Promise<{ section: string }>
 }) {
   const { section } = await params
+  if (section === 'groups') return <AcademicCatalog />
   return <EmptyPlaceholder title={TITLES[section] ?? 'Không tìm thấy trang'} />
 }
