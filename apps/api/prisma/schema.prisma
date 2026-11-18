@@ -433,6 +433,8 @@ model Enrollment {
   courseScore         Decimal?         @map("course_score") @db.Decimal(3, 1)
   registeredAt        DateTime         @default(now()) @map("registered_at") @db.Timestamptz(3)
   cancelledAt         DateTime?        @map("cancelled_at") @db.Timestamptz(3)
+  /// DK-06: reason shown in the form's "Đã huỷ" section when the daily job cancels a line.
+  cancellationReason  String?          @map("cancellation_reason")
   finalizedAt         DateTime?        @map("finalized_at") @db.Timestamptz(3)
 
   form    RegistrationForm @relation(fields: [formId], references: [id])
