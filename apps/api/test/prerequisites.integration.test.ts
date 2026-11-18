@@ -17,6 +17,7 @@ import { RegistrationClock, RegistrationService } from '../src/registration/regi
 import { DEMO_NOW } from '../prisma/seed/scenarios'
 import { ReceivingAccountService } from '../src/finance/receiving-account.service'
 import { TuitionService } from '../src/tuition/tuition.service'
+import { clearRegistrationRateLimits } from './fixtures/rate-limit'
 
 const suffix = randomUUID().slice(0, 6)
 const vn = (date: string, time = '00:00') => new Date(`${date}T${time}:00+07:00`)
@@ -118,6 +119,7 @@ describe('prerequisites & conditional registration (integration: dkhp_w48 + Redi
     prisma = new PrismaService()
     await prisma.onModuleInit()
     idempotency = new RegistrationIdempotency()
+    await clearRegistrationRateLimits()
     redis = new Redis('redis://localhost:6379/14', { maxRetriesPerRequest: 1 })
     service = new RegistrationService(
       prisma,
@@ -147,6 +149,31 @@ describe('prerequisites & conditional registration (integration: dkhp_w48 + Redi
   })
 
   afterAll(async () => {
+    // Remove every fixture student so later suites (monitoring counts, BM7) see only the seed.
+    // The ledger is append-only (ADR-0004), so cleanup lifts the trigger like the tuition suite.
+    const studentIds = students.map((student) => student.studentId)
+    if (studentIds.length > 0) {
+      const ids = studentIds.join(',')
+      await prisma.$executeRawUnsafe(
+        'ALTER TABLE ledger_entry DISABLE TRIGGER ledger_entry_append_only',
+      )
+      try {
+        await prisma.$executeRawUnsafe(
+          `UPDATE ledger_entry SET related_entry_id = NULL WHERE student_id IN (${ids})`,
+        )
+        await prisma.ledgerEntry.deleteMany({ where: { studentId: { in: studentIds } } })
+      } finally {
+        await prisma.$executeRawUnsafe(
+          'ALTER TABLE ledger_entry ENABLE TRIGGER ledger_entry_append_only',
+        )
+      }
+      await prisma.enrollment.deleteMany({ where: { form: { studentId: { in: studentIds } } } })
+      await prisma.registrationForm.deleteMany({ where: { studentId: { in: studentIds } } })
+      await prisma.takenCourse.deleteMany({ where: { studentId: { in: studentIds } } })
+      await prisma.creditWarning.deleteMany({ where: { studentId: { in: studentIds } } })
+      await prisma.student.deleteMany({ where: { id: { in: studentIds } } })
+      await prisma.user.deleteMany({ where: { id: { in: students.map((row) => row.userId) } } })
+    }
     for (const sectionId of touchedSections)
       await prisma.$executeRaw`
         UPDATE course_section s SET enrolled_count = (

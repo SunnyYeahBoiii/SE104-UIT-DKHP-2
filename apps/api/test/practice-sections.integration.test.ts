@@ -13,6 +13,7 @@ import { PrismaService } from '../src/prisma/prisma.service'
 import { DEMO_NOW } from '../prisma/seed/scenarios'
 import { ReceivingAccountService } from '../src/finance/receiving-account.service'
 import { TuitionService } from '../src/tuition/tuition.service'
+import { clearRegistrationRateLimits } from './fixtures/rate-limit'
 
 class FakeClock extends RegistrationClock {
   override now(): Date {
@@ -57,6 +58,7 @@ describe('practice sections and retake split (integration: Postgres dkhp_w47 + R
     prisma = new PrismaService()
     await prisma.onModuleInit()
     idempotency = new RegistrationIdempotency()
+    await clearRegistrationRateLimits()
     redis = new Redis('redis://localhost:6379/15', { maxRetriesPerRequest: 1 })
     service = new RegistrationService(
       prisma,

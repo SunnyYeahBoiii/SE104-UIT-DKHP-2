@@ -23,6 +23,7 @@ import { RegistrationIdempotency } from '../src/registration/idempotency'
 import { TermPhaseService } from '../src/term-phases/term-phase.service'
 import { TuitionRegistrationHook } from '../src/tuition/tuition-registration.hook'
 import { TuitionService } from '../src/tuition/tuition.service'
+import { clearRegistrationRateLimits } from './fixtures/rate-limit'
 
 const vn = (date: string, time = '00:00') => new Date(`${date}T${time}:00+07:00`)
 const suffix = randomUUID().slice(0, 6).toUpperCase()
@@ -252,6 +253,7 @@ describe('tuition writes (integration: Postgres dkhp_w51, isolated fixtures)', (
     hook = new TuitionRegistrationHook(tuition)
     service = new TermPhaseService(prisma, clock, hook)
     idempotency = new RegistrationIdempotency()
+    await clearRegistrationRateLimits()
     redis = new Redis('redis://localhost:6379/14', { maxRetriesPerRequest: 1 })
     registration = new RegistrationService(prisma, new FixtureClock(), idempotency, tuition)
 

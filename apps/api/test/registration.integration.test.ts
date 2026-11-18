@@ -16,6 +16,7 @@ import { PrismaService } from '../src/prisma/prisma.service'
 import { DEMO_NOW } from '../prisma/seed/scenarios'
 import { ReceivingAccountService } from '../src/finance/receiving-account.service'
 import { TuitionService } from '../src/tuition/tuition.service'
+import { clearRegistrationRateLimits } from './fixtures/rate-limit'
 
 const PASSWORD = 'Dkhp@2026'
 const suffix = randomUUID().slice(0, 6)
@@ -91,6 +92,7 @@ describe('registration (integration: Postgres dkhp_w46 + Redis 14, demo clock 06
     prisma = new PrismaService()
     await prisma.onModuleInit()
     idempotency = new RegistrationIdempotency()
+    await clearRegistrationRateLimits()
     redis = new Redis('redis://localhost:6379/14', { maxRetriesPerRequest: 1 })
     const tuition = new TuitionService(prisma, new ReceivingAccountService(prisma))
     service = new RegistrationService(prisma, new FakeClock(), idempotency, tuition)
@@ -449,7 +451,14 @@ describe('registration (integration: Postgres dkhp_w46 + Redis 14, demo clock 06
   })
 
   it('DK-08: a class above the term cap is refused with the remaining credits', async () => {
-    const result = await service.register(raceUsers[111]!, key(), {
+    // The 200-seat race above picks winners at random, so take a student it left with 0 credits.
+    const idle = await prisma.student.findFirstOrThrow({
+      where: {
+        userId: { in: raceUsers.slice(100, 110) },
+        registrationForms: { none: { enrollments: { some: { status: { not: 'CANCELLED' } } } } },
+      },
+    })
+    const result = await service.register(idle.userId, key(), {
       sectionIds: [overCreditSectionId],
     })
     expect(result.results[0]?.code).toBe('DK-08')
