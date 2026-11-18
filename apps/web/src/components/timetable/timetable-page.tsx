@@ -3,6 +3,8 @@
 import { Download, FileSpreadsheet, UploadCloud } from 'lucide-react'
 import { useEffect, useRef, useState, type ChangeEvent, type DragEvent } from 'react'
 
+import { ScheduleGrid } from '@/components/timetable/schedule-grid'
+import { SectionForm } from '@/components/timetable/section-form'
 import { Banner, Button, Card } from '@/components/ui'
 import { api } from '@/lib/auth'
 import {
@@ -11,10 +13,15 @@ import {
   MODE_LABELS,
   PHASE_LABELS,
   reportCsv,
+  draftFromSection,
+  emptyDraft,
+  type EditorResponse,
+  type EditorSection,
   type ImportIssue,
   type ImportResult,
   type OverviewResponse,
   type PreviewResponse,
+  type SectionDraft,
   type TermOption,
 } from '@/lib/timetable'
 
@@ -73,8 +80,17 @@ export function TimetablePage() {
   const [confirmed, setConfirmed] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [tab, setTab] = useState<'offered' | 'sections'>('offered')
+  const [tab, setTab] = useState<'offered' | 'sections' | 'schedule'>('offered')
   const [filters, setFilters] = useState({ system: '', course: '', cohort: '', warning: false })
+  const [editor, setEditor] = useState<EditorResponse | null>(null)
+  const [draft, setDraft] = useState<SectionDraft | null>(null)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [isNew, setIsNew] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [creditsDraft, setCreditsDraft] = useState<Record<number, string>>({})
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [originalCode, setOriginalCode] = useState('')
 
   useEffect(() => {
     void api<TermsResponse>('/academics/terms')
@@ -91,8 +107,14 @@ export function TimetablePage() {
     let cancelled = false
     const load = async () => {
       try {
-        const data = await api<OverviewResponse>(`/timetable/${code}`)
-        if (!cancelled) setOverview(data)
+        const [data, editData] = await Promise.all([
+          api<OverviewResponse>(`/timetable/${code}`),
+          api<EditorResponse>(`/timetable/${code}/editor`),
+        ])
+        if (!cancelled) {
+          setOverview(data)
+          setEditor(editData)
+        }
       } catch (cause) {
         if (!cancelled) setError((cause as Error).message)
       }
@@ -104,7 +126,8 @@ export function TimetablePage() {
   }, [code])
 
   const canImport = overview?.term.canImport ?? false
-  const lockReason = overview?.term.reason ?? 'Chọn một học kỳ để xem thời khoá biểu.'
+  const lockReason =
+    editor?.term.reason ?? overview?.term.reason ?? 'Chọn một học kỳ để xem thời khoá biểu.'
 
   const resetImport = () => {
     setStep(-1)
@@ -165,7 +188,12 @@ export function TimetablePage() {
       })
       setResult(data)
       setStep(3)
-      setOverview(await api<OverviewResponse>(`/timetable/${code}`))
+      const [fresh, editData] = await Promise.all([
+        api<OverviewResponse>(`/timetable/${code}`),
+        api<EditorResponse>(`/timetable/${code}/editor`),
+      ])
+      setOverview(fresh)
+      setEditor(editData)
     } catch (cause) {
       setError((cause as Error).message)
     } finally {
@@ -185,7 +213,108 @@ export function TimetablePage() {
     URL.revokeObjectURL(url)
   }
 
-  const sections = overview?.sections ?? []
+  const editSections = editor?.sections ?? []
+
+  const refreshEditor = async () => {
+    const [fresh, editData] = await Promise.all([
+      api<OverviewResponse>(`/timetable/${code}`),
+      api<EditorResponse>(`/timetable/${code}/editor`),
+    ])
+    setOverview(fresh)
+    setEditor(editData)
+  }
+
+  const openSection = (section: EditorSection) => {
+    setDraft(draftFromSection(section))
+    setEditingId(section.id)
+    setOriginalCode(section.code)
+    setIsNew(false)
+    setDeleteConfirm(false)
+    setDrawerOpen(true)
+  }
+
+  const openNewSection = () => {
+    if (!editor) return
+    setDraft(emptyDraft(editor.options))
+    setEditingId(null)
+    setOriginalCode('')
+    setIsNew(true)
+    setDeleteConfirm(false)
+    setDrawerOpen(true)
+  }
+
+  const changeDraft = (next: SectionDraft) => {
+    setDraft(next)
+    if (next.code !== originalCode) {
+      setEditingId(null)
+      setIsNew(true)
+    }
+  }
+
+  const saveSection = async () => {
+    if (!draft) return
+    setSaving(true)
+    setError('')
+    try {
+      if (isNew || editingId === null)
+        await api(`/timetable/${code}/sections`, { method: 'POST', body: JSON.stringify(draft) })
+      else
+        await api(`/timetable/${code}/sections/${editingId}`, {
+          method: 'PATCH',
+          body: JSON.stringify(draft),
+        })
+      await refreshEditor()
+      setDrawerOpen(false)
+      setDraft(null)
+    } catch (cause) {
+      setError((cause as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const deleteSection = async () => {
+    if (!draft || editingId === null) return
+    if (!deleteConfirm) {
+      setDeleteConfirm(true)
+      return
+    }
+    setSaving(true)
+    setError('')
+    try {
+      await api(`/timetable/${code}/sections/${editingId}`, { method: 'DELETE' })
+      await refreshEditor()
+      setDrawerOpen(false)
+      setDraft(null)
+    } catch (cause) {
+      setError((cause as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const saveCredits = async (offeringId: number, value: string) => {
+    const credits = Number(value)
+    if (!Number.isInteger(credits) || credits < 0) {
+      setError('Tín chỉ phải là số nguyên không âm.')
+      return
+    }
+    setSaving(true)
+    setError('')
+    try {
+      await api(`/timetable/${code}/offered-courses/${offeringId}/credits`, {
+        method: 'PATCH',
+        body: JSON.stringify({ credits }),
+      })
+      await refreshEditor()
+    } catch (cause) {
+      setError((cause as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const sections = editSections
   const systems = [...new Set(sections.map((section) => section.systemCode))].sort()
   const courses = [...new Set(sections.map((section) => section.courseCode))].sort()
   const cohorts = [
@@ -443,6 +572,7 @@ export function TimetablePage() {
               [
                 ['offered', `Môn mở (${overview.counts.offeredCourses})`],
                 ['sections', `Lớp học phần (${overview.counts.sections})`],
+                ['schedule', 'Lịch tổng'],
               ] as const
             ).map(([value, label]) => (
               <button
@@ -475,22 +605,57 @@ export function TimetablePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {overview.offeredCourses.map((course) => (
+                  {(editor?.options.offerings ?? []).map((course) => (
                     <tr key={course.id} className="border-t border-line">
                       <td className={`${TD} font-mono`}>{course.code}</td>
                       <td className={TD}>{course.name}</td>
                       <td className={TD}>{course.type === 'THEORY' ? 'LT' : 'TH'}</td>
-                      <td className={`${TD} tabular font-semibold`}>{course.credits}</td>
+                      <td className={`${TD} tabular font-semibold`}>
+                        {editor?.term.canEdit ? (
+                          <input
+                            aria-label={`Tín chỉ ${course.code}`}
+                            type="number"
+                            min={0}
+                            value={creditsDraft[course.id] ?? String(course.credits)}
+                            onChange={(event) =>
+                              setCreditsDraft({ ...creditsDraft, [course.id]: event.target.value })
+                            }
+                            onBlur={(event) => {
+                              if (event.target.value !== String(course.credits))
+                                void saveCredits(course.id, event.target.value)
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') event.currentTarget.blur()
+                            }}
+                            className="tabular h-10 w-20 rounded-sm border border-neutral-200 bg-surface px-2 text-sm"
+                          />
+                        ) : (
+                          course.credits
+                        )}
+                      </td>
                       <td className={`${TD} tabular text-muted`}>{course.defaultCredits}</td>
                       <td className={`${TD} tabular`}>{course.sectionCount}</td>
-                      <td className={`${TD} tabular`}>{course.totalCapacity}</td>
+                      <td className={`${TD} tabular`}>
+                        {sections
+                          .filter((section) => section.courseCode === course.code)
+                          .reduce((sum, section) => sum + section.capacity, 0)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          ) : (
+          ) : tab === 'sections' ? (
             <div role="tabpanel" className="space-y-4 pt-4">
+              <div className="flex flex-wrap items-center gap-3">
+                <Button
+                  onClick={openNewSection}
+                  disabled={!editor?.term.canEdit}
+                  title={editor?.term.canEdit ? undefined : lockReason}
+                >
+                  Thêm lớp
+                </Button>
+              </div>
               <div className="flex flex-wrap gap-3">
                 <select
                   aria-label="Lọc theo hệ"
@@ -555,6 +720,7 @@ export function TimetablePage() {
                       <th className={TH}>Buổi học</th>
                       <th className={TH}>Hình thức</th>
                       <th className={TH}>Cảnh báo</th>
+                      <th className={TH}>Thao tác</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -568,18 +734,29 @@ export function TimetablePage() {
                         <td className={`${TD} tabular`}>{section.enrolledCount}</td>
                         <td className={TD}>{cohortLabel(section.reservedAdmissionYear)}</td>
                         <td className={TD}>{section.language ?? '—'}</td>
-                        <td className={`${TD} tabular`}>{section.meetingCount}</td>
+                        <td className={`${TD} tabular`}>{section.meetings.length}</td>
                         <td className={TD}>
                           {section.practiceMode ? MODE_LABELS[section.practiceMode] : '—'}
                         </td>
                         <td className={TD}>
                           {section.hasWarning ? (
-                            <span className="rounded-sm bg-warning-50 px-2 py-1 text-xs text-warning-700">
+                            <span
+                              title={section.meetings
+                                .flatMap((meeting) => meeting.warnings)
+                                .map((warning) => warning.message)
+                                .join('\n')}
+                              className="rounded-sm bg-warning-50 px-2 py-1 text-xs text-warning-700"
+                            >
                               Có
                             </span>
                           ) : (
                             '—'
                           )}
+                        </td>
+                        <td className={TD}>
+                          <Button variant="link" onClick={() => openSection(section)}>
+                            Sửa
+                          </Button>
                         </td>
                       </tr>
                     ))}
@@ -592,8 +769,45 @@ export function TimetablePage() {
                 ) : null}
               </div>
             </div>
+          ) : (
+            <div role="tabpanel" className="pt-4">
+              <ScheduleGrid
+                sections={sections}
+                rooms={editor?.options.rooms ?? []}
+                lecturers={editor?.options.lecturers ?? []}
+              />
+            </div>
           )}
         </Card>
+      ) : null}
+
+      {draft ? (
+        <SectionForm
+          open={drawerOpen}
+          title={isNew ? 'Thêm lớp học phần' : `Sửa lớp ${draft.code}`}
+          draft={draft}
+          options={
+            editor?.options ?? { offerings: [], lecturers: [], rooms: [], systems: [], cohorts: [] }
+          }
+          sections={sections}
+          termStart={editor?.term.startDate ?? ''}
+          canEdit={editor?.term.canEdit ?? false}
+          lockReason={editor?.term.reason ?? null}
+          warnings={
+            sections
+              .find((section) => section.code === draft.code)
+              ?.meetings.flatMap((meeting) => meeting.warnings) ?? []
+          }
+          busy={saving}
+          error={error}
+          onClose={() => {
+            setDrawerOpen(false)
+            setDeleteConfirm(false)
+          }}
+          onChange={changeDraft}
+          onSave={() => void saveSection()}
+          onDelete={() => void deleteSection()}
+        />
       ) : null}
     </div>
   )
