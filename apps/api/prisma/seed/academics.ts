@@ -412,7 +412,7 @@ export async function seedAcademics(
     let offeredCourseId = offered.get(offeringKey)
     if (offeredCourseId === undefined) {
       const created = await db.offeredCourse.create({
-        data: { termId: term.id, courseId: course.id },
+        data: { termId: term.id, courseId: course.id, credits: course.credits },
       })
       offeredCourseId = created.id
       offered.set(offeringKey, offeredCourseId)

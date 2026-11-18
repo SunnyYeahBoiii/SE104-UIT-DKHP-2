@@ -20,6 +20,22 @@ export const COHORTS: [code: string, admissionYear: number][] = [
   ['K20', 2025],
 ]
 
+/** CONTEXT.md: rooms are background data. Codes used by the A.7 sections plus a few spares for import tests. */
+const ROOM_CODES = [
+  'A1.01',
+  'A2.08',
+  'B1.14',
+  'B3.06',
+  'B4.02',
+  'B4.04',
+  'B4.06',
+  'C1.08',
+  'C2.12',
+  'C3.12',
+  'C3.14',
+  'E3.1',
+]
+
 const PRIORITY_GROUPS = [
   { code: 'LIET_SI', name: 'Con liệt sĩ', discountRate: 80, priority: 40 },
   { code: 'THUONG_BINH', name: 'Con thương binh, bệnh binh', discountRate: 50, priority: 30 },
@@ -120,6 +136,8 @@ export async function seedCatalog(db: Db): Promise<Catalog> {
     const created = await db.cohort.create({ data: { code, admissionYear } })
     cohorts.set(code, { id: created.id, admissionYear })
   }
+
+  for (const code of ROOM_CODES) await db.room.create({ data: { code } })
 
   const priorityGroups = new Map<string, { id: number; discountRate: number; priority: number }>()
   for (const group of PRIORITY_GROUPS) {

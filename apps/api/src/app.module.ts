@@ -9,9 +9,10 @@ import { RequestIdMiddleware } from './common/request-id.middleware'
 import { HealthController } from './health/health.controller'
 import { PrismaModule } from './prisma/prisma.module'
 import { StudentsModule } from './students/students.module'
+import { TimetableModule } from './timetable/timetable.module'
 
 @Module({
-  imports: [PrismaModule, AuthModule, StudentsModule, AcademicsModule],
+  imports: [PrismaModule, AuthModule, StudentsModule, AcademicsModule, TimetableModule],
   controllers: [HealthController],
   providers: [
     Reflector,

@@ -140,6 +140,15 @@ model Lecturer {
   @@map("lecturer")
 }
 
+/// CONTEXT.md: a room is background data (code only). The timetable importer validates against this
+/// catalogue (TKB-03) but never creates rooms (ADR-0019).
+model Room {
+  id   Int    @id @default(autoincrement())
+  code String @unique
+
+  @@map("room")
+}
+
 // ────────────────────────── Courses ──────────────────────────
 
 enum CourseType {
@@ -293,11 +302,13 @@ model RegistrationSlotCohort {
   @@map("registration_slot_cohort")
 }
 
-/// BM4: a course opened in a term.
+/// BM4: a course opened in a term. ADR-0017/TKB-05: credits belong to the offering, are taken from the
+/// TKB TỐ TC column (default = course credits when blank) and may be zero.
 model OfferedCourse {
   id       Int             @id @default(autoincrement())
   termId   Int             @map("term_id")
   courseId Int             @map("course_id")
+  credits  Int
   term     Term            @relation(fields: [termId], references: [id])
   course   Course          @relation(fields: [courseId], references: [id])
   sections CourseSection[]
@@ -307,32 +318,35 @@ model OfferedCourse {
 }
 
 /// DT-11: set on a THEORY section that has practice sections and shared by all of them; frozen once the term
-/// leaves PREPARATION. SCHEDULED (HT1): one or two sections with fixed meetings. SELF_SCHEDULED (HT2): exactly
-/// one section with no meetings and the same capacity as the THEORY section.
+/// leaves PREPARATION. SCHEDULED (HT1): groups with fixed meetings. SELF_SCHEDULED (HT2): groups with no meetings.
 enum PracticeMode {
   SCHEDULED
   SELF_SCHEDULED
 }
 
 /// The unit students register for, e.g. SE104.P21. A PracticeSection (SE104.P21.1) belongs to a PRACTICE
-/// course offering and points at its parent section of the companion THEORY course (ADR-0002). A parent has
-/// at most two, coded `.1` and `.2`. Only the parent carries `practiceMode`. DK-19: a section belongs to a
+/// course offering and points at its parent section of the companion THEORY course (ADR-0002). Groups are
+/// coded `<parent code>.n` with n >= 1, not necessarily consecutive (ADR-0002). Only the parent carries
+/// `practiceMode`. DK-19: a section belongs to a
 /// training system, checked against the student's system at registration time only.
 /// `enrolledCount` is only changed by the conditional UPDATE in ADR-0005 and guarded by a CHECK.
 model CourseSection {
-  id               Int           @id @default(autoincrement())
-  offeredCourseId  Int           @map("offered_course_id")
-  trainingSystemId Int           @map("training_system_id")
-  code             String
-  lecturerId       Int?          @map("lecturer_id")
+  id                    Int           @id @default(autoincrement())
+  offeredCourseId       Int           @map("offered_course_id")
+  trainingSystemId      Int           @map("training_system_id")
+  code                  String
+  lecturerId            Int?          @map("lecturer_id")
   /// Display-only language of instruction, e.g. "EN" for SE104.P23.
-  language         String?
-  capacity         Int
-  enrolledCount    Int           @default(0) @map("enrolled_count")
-  parentSectionId  Int?          @map("parent_section_id")
-  practiceMode     PracticeMode? @map("practice_mode")
-  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt        DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+  language              String?
+  /// TKB-07: reserved cohort as an admission year, null = every cohort. Display/filter only (DT-08).
+  reservedAdmissionYear Int?          @map("reserved_admission_year")
+  note                  String?
+  capacity              Int
+  enrolledCount         Int           @default(0) @map("enrolled_count")
+  parentSectionId       Int?          @map("parent_section_id")
+  practiceMode          PracticeMode? @map("practice_mode")
+  createdAt             DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   offeredCourse    OfferedCourse   @relation(fields: [offeredCourseId], references: [id])
   trainingSystem   TrainingSystem  @relation(fields: [trainingSystemId], references: [id])
