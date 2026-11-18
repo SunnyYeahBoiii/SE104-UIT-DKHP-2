@@ -13,7 +13,14 @@ import { StudentsModule } from './students/students.module'
 import { TimetableModule } from './timetable/timetable.module'
 
 @Module({
-  imports: [PrismaModule, AuthModule, StudentsModule, AcademicsModule, TimetableModule, FinanceModule],
+  imports: [
+    PrismaModule,
+    AuthModule,
+    StudentsModule,
+    AcademicsModule,
+    TimetableModule,
+    FinanceModule,
+  ],
   controllers: [HealthController],
   providers: [
     Reflector,
