@@ -195,38 +195,6 @@ export async function seedTuition(
     for (const student of people.students.values()) {
       const schedule = feeFor(student)
       if (!schedule) continue // K20 · CLC: no fee schedule on purpose.
-      if (termCode === OPEN_TERM && student.code === DEMO.recalculated) {
-        // HP-12: CQUI → CLC during the registration period; the registered classes stay as they were.
-        const original = await debit(
-          student,
-          termCode,
-          LedgerEntryType.BASE_TUITION,
-          must(fees, feeKey(student.cohort, 'CQUI')).base,
-          `Học phí cố định HK2 2026–2027 (hồ sơ cũ)`,
-          { createdAt: term.registrationStartAt },
-        )
-        await post(
-          student.code,
-          termCode,
-          LedgerEntryType.BASE_TUITION_REVERSAL,
-          LedgerDirection.CREDIT,
-          original.entry.amount,
-          {
-            relatedEntryId: original.entry.id,
-            createdAt: addHours(term.registrationStartAt, 2),
-            description: 'Tính lại học phí: đảo học phí cố định cũ',
-          },
-        )
-        await debit(
-          { ...student, system: 'CLC' },
-          termCode,
-          LedgerEntryType.BASE_TUITION,
-          schedule.base,
-          'Học phí cố định HK2 2026–2027 (hồ sơ mới CLC)',
-          { createdAt: addHours(term.registrationStartAt, 3), relatedEntryId: original.entry.id },
-        )
-        continue
-      }
       await debit(
         student,
         termCode,

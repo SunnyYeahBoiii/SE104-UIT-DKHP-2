@@ -51,7 +51,7 @@ const STUDENTS: StudentSeed[] = [
   { code: DEMO.retakeReregistered, name: 'Võ Gia Huy', cohort: 'K19', system: 'CQUI' },
   { code: DEMO.summerRetake, name: 'Trịnh Bảo Ngọc', cohort: 'K19', system: 'CQUI' },
   { code: DEMO.overdue, name: 'Đặng Thanh Trang', cohort: 'K19', system: 'CQUI' },
-  { code: DEMO.recalculated, name: 'Đinh Hoàng Phúc', cohort: 'K19', system: 'CLC' },
+  { code: DEMO.recalculated, name: 'Đinh Hoàng Phúc', cohort: 'K19', system: 'CQUI' },
   { code: DEMO.clcStudent, name: 'Phan Minh Triết', cohort: 'K19', system: 'CLC' },
   { code: DEMO.improvement, name: 'Bùi Ngọc Linh', cohort: 'K18', system: 'CQUI' },
   { code: DEMO.missingFeeSchedule, name: 'Ngô Đức Mạnh', cohort: 'K20', system: 'CLC' },

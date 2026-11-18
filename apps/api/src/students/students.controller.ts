@@ -130,6 +130,12 @@ export class StudentsController {
     return this.students.update(code, input, this.audit(req))
   }
 
+  @Post(':code/tuition-preview')
+  @HttpCode(200)
+  previewTuition(@Param('code') code: string, @Body() body: unknown) {
+    return this.students.previewTuition(code, studentInput(body))
+  }
+
   @Post(':code/reset-password')
   @HttpCode(200)
   resetPassword(@Param('code') code: string, @Req() req: AuthRequest) {

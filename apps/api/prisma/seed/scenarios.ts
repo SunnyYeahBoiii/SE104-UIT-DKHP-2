@@ -26,7 +26,7 @@ export const DEMO = {
   summerRetake: '24520010',
   /** 5.000.000 đ outstanding on 20261 after the deadline, listed in BM7. */
   overdue: '24520011',
-  /** Academic office switched CQUI → CLC during registration: 15M reversed, 20M posted (HP-12). */
+  /** CQUI before the edit; the #52 integration test switches to CLC: 15M → 20M (HP-12). */
   recalculated: '24520013',
   /** K19 CLC filler; the student in SE104.P23 (language EN). */
   clcStudent: '24520014',
