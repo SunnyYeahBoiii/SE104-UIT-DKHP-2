@@ -83,11 +83,46 @@ export type TuitionOverview = {
   } | null
 }
 
-type Totals = {
+export type LedgerTotals = {
   debits: bigint
   credits: bigint
   discountCredits: bigint
   discountReversals: bigint
+}
+
+/** HP-09: the one fold used by the student portal and by the finance office's BM7 report. */
+export function ledgerTotals(
+  rows: readonly { type: LedgerEntryType; direction: LedgerDirection; amount: bigint }[],
+): LedgerTotals {
+  const totals: LedgerTotals = {
+    debits: 0n,
+    credits: 0n,
+    discountCredits: 0n,
+    discountReversals: 0n,
+  }
+  for (const row of rows) {
+    if (row.direction === LedgerDirection.DEBIT) {
+      totals.debits += row.amount
+      if (row.type === LedgerEntryType.DISCOUNT_REVERSAL) totals.discountReversals += row.amount
+    } else {
+      totals.credits += row.amount
+      if (row.type === LedgerEntryType.DISCOUNT) totals.discountCredits += row.amount
+    }
+  }
+  return totals
+}
+
+export function bm7FromTotals(totals: LedgerTotals): Bm7 {
+  const gross = totals.debits - totals.discountReversals
+  const discount = totals.discountCredits - totals.discountReversals
+  const paid = totals.credits - totals.discountCredits
+  return {
+    grossAmount: Number(gross),
+    discountAmount: Number(discount),
+    netAmount: Number(gross - discount),
+    paidAmount: Number(paid),
+    outstandingAmount: Number(gross - discount - paid),
+  }
 }
 
 const ATTEMPT_LABEL: Record<AttemptType, string> = {
@@ -307,22 +342,12 @@ export class TuitionService {
     })
   }
 
-  private async totals(db: Db, studentId: number, termId: number): Promise<Totals> {
+  private async totals(db: Db, studentId: number, termId: number): Promise<LedgerTotals> {
     const rows = await db.ledgerEntry.findMany({
       where: { studentId, termId },
       select: { type: true, direction: true, amount: true },
     })
-    const totals: Totals = { debits: 0n, credits: 0n, discountCredits: 0n, discountReversals: 0n }
-    for (const row of rows) {
-      if (row.direction === LedgerDirection.DEBIT) {
-        totals.debits += row.amount
-        if (row.type === LedgerEntryType.DISCOUNT_REVERSAL) totals.discountReversals += row.amount
-      } else {
-        totals.credits += row.amount
-        if (row.type === LedgerEntryType.DISCOUNT) totals.discountCredits += row.amount
-      }
-    }
-    return totals
+    return ledgerTotals(rows)
   }
 
   /**
@@ -332,21 +357,7 @@ export class TuitionService {
    * keeps the three columns consistent with the append-only ledger.
    */
   async bm7(db: Db, studentId: number, termId: number): Promise<Bm7> {
-    const { debits, credits, discountCredits, discountReversals } = await this.totals(
-      db,
-      studentId,
-      termId,
-    )
-    const gross = debits - discountReversals
-    const discount = discountCredits - discountReversals
-    const paid = credits - discountCredits
-    return {
-      grossAmount: Number(gross),
-      discountAmount: Number(discount),
-      netAmount: Number(gross - discount),
-      paidAmount: Number(paid),
-      outstandingAmount: Number(gross - discount - paid),
-    }
+    return bm7FromTotals(await this.totals(db, studentId, termId))
   }
 
   /** B.4.4: newest first, plain-language labels, payment code and deadline for the student portal. */
