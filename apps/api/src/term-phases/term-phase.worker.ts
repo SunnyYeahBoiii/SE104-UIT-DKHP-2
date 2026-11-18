@@ -5,12 +5,8 @@ import type { Job, Queue } from 'bullmq'
 import { Clock } from '../academics/clock'
 import { PrismaModule } from '../prisma/prisma.module'
 import { PrerequisiteReviewModule } from '../registration/prerequisite-review.worker'
-import {
-  NoopTermRegistrationHook,
-  TERM_REGISTRATION_HOOK,
-  TermPhaseService,
-  type AdvanceResult,
-} from './term-phase.service'
+import { TuitionModule } from '../tuition/tuition.module'
+import { TermPhaseService, type AdvanceResult } from './term-phase.service'
 
 export const TERM_PHASE_QUEUE = 'term-phases'
 export const ADVANCE_JOB = 'advance'
@@ -53,15 +49,9 @@ export class TermPhaseScheduler implements OnApplicationBootstrap {
 }
 
 @Module({
-  imports: [BullModule.registerQueue({ name: TERM_PHASE_QUEUE })],
-  providers: [
-    Clock,
-    TermPhaseService,
-    TermPhaseProcessor,
-    TermPhaseScheduler,
-    { provide: TERM_REGISTRATION_HOOK, useClass: NoopTermRegistrationHook },
-  ],
-  exports: [TERM_REGISTRATION_HOOK, TermPhaseService],
+  imports: [BullModule.registerQueue({ name: TERM_PHASE_QUEUE }), TuitionModule],
+  providers: [Clock, TermPhaseService, TermPhaseProcessor, TermPhaseScheduler],
+  exports: [TermPhaseService],
 })
 export class TermPhasesModule {}
 

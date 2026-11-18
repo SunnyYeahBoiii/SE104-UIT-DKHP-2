@@ -5,15 +5,11 @@ import { nextTermPhase, type MilestoneValues, type TermPhase } from '../academic
 import type { Prisma, Term } from '../generated/prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 
-/** Replace in the worker module when the tuition slice is implemented (HP-02). */
+/** HP-02/HP-11: bound to the tuition hook in the worker module. */
 export const TERM_REGISTRATION_HOOK = 'TERM_REGISTRATION_HOOK'
 
 export interface TermRegistrationHook {
   onEnterRegistration(tx: Prisma.TransactionClient, term: Term): Promise<void>
-}
-
-export class NoopTermRegistrationHook implements TermRegistrationHook {
-  async onEnterRegistration(): Promise<void> {}
 }
 
 export type TermPhaseTransition = { termCode: string; from: TermPhase; to: TermPhase }
