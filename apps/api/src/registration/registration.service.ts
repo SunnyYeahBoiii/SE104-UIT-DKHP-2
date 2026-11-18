@@ -256,12 +256,23 @@ export class RegistrationService {
     return this.idempotency.run('register', userId, idempotencyKey, async () => {
       await this.idempotency.checkRate(userId)
       const context = await this.context(userId)
+      const groups = await this.prisma.courseSection.findMany({
+        where: { id: { in: input.sectionIds }, parentSectionId: { not: null } },
+        select: { id: true },
+      })
+      const groupIds = new Set(groups.map((group) => group.id))
+      const ordered = [
+        ...input.sectionIds.filter((id) => !groupIds.has(id)),
+        ...input.sectionIds.filter((id) => groupIds.has(id)),
+      ]
       const accepted: number[][] = []
       const results: RegistrationResult[] = []
-      for (const sectionId of input.sectionIds) {
+      const outcomes = new Map<number, RegistrationResult>()
+      for (const sectionId of ordered) {
         try {
-          const winner = await this.registerOne(context, sectionId, accepted)
+          const winner = await this.registerOne(context, sectionId, accepted, outcomes)
           results.push(winner)
+          outcomes.set(sectionId, winner)
           if (winner.ok) {
             const section = await this.prisma.courseSection.findUniqueOrThrow({
               where: { id: sectionId },
@@ -271,14 +282,21 @@ export class RegistrationService {
           }
         } catch (error) {
           if (error instanceof RuleFailure) {
-            results.push(error.result(sectionId))
+            const failure = error.result(sectionId)
+            results.push(failure)
+            outcomes.set(sectionId, failure)
             continue
           }
           throw error
         }
       }
+      const byId = new Map(results.map((result) => [result.sectionId, result]))
       const fresh = await this.context(userId)
-      return { results, form: fresh.form, permission: fresh.permission }
+      return {
+        results: input.sectionIds.map((id) => byId.get(id)!),
+        form: fresh.form,
+        permission: fresh.permission,
+      }
     })
   }
 
@@ -312,16 +330,36 @@ export class RegistrationService {
         if (enrollment.form.finalizedAt)
           this.fail('FORM_FINALIZED', 'Phiếu đã chốt. Không còn huỷ lớp được.', 409)
 
+        const parentId = enrollment.section.parentSectionId
+        const linked = parentId
+          ? await tx.enrollment.findFirst({
+              where: { formId: enrollment.formId, sectionId: parentId, status: 'REGISTERED' },
+              include: { section: true },
+            })
+          : await tx.enrollment.findFirst({
+              where: {
+                formId: enrollment.formId,
+                status: 'REGISTERED',
+                section: { parentSectionId: enrollment.sectionId },
+              },
+              include: { section: true },
+            })
+        const pair = [enrollment, ...(linked ? [linked] : [])].sort(
+          (left, right) => left.sectionId - right.sectionId,
+        )
         const at = this.clock.now()
-        await tx.enrollment.update({
-          where: { id: enrollmentId },
-          data: { status: EnrollmentStatus.CANCELLED, cancelledAt: at },
-        })
-        const released = await tx.$executeRaw`
-          UPDATE course_section SET enrolled_count = enrolled_count - 1, updated_at = now()
-          WHERE id = ${enrollment.sectionId} AND enrolled_count > 0`
-        if (released !== 1)
-          this.fail('SEAT_RELEASE_FAILED', 'Không trả được chỗ. Vui lòng thử lại.', 409)
+        for (const item of pair)
+          await tx.enrollment.update({
+            where: { id: item.id },
+            data: { status: EnrollmentStatus.CANCELLED, cancelledAt: at },
+          })
+        for (const item of pair) {
+          const released = await tx.$executeRaw`
+            UPDATE course_section SET enrolled_count = enrolled_count - 1, updated_at = now()
+            WHERE id = ${item.sectionId} AND enrolled_count > 0`
+          if (released !== 1)
+            this.fail('SEAT_RELEASE_FAILED', 'Không trả được chỗ. Vui lòng thử lại.', 409)
+        }
         const section = await tx.courseSection.findUniqueOrThrow({
           where: { id: enrollment.sectionId },
         })
@@ -331,6 +369,12 @@ export class RegistrationService {
           sectionCode: enrollment.section.code,
           status: 'CANCELLED',
           remaining: section.capacity - section.enrolledCount,
+          cancelledEnrollments: pair.map((item) => ({
+            enrollmentId: item.id,
+            sectionId: item.sectionId,
+            sectionCode: item.section.code,
+            status: 'CANCELLED',
+          })),
         }
       })
     })
@@ -436,6 +480,7 @@ export class RegistrationService {
       where: { studentId, courseId: { in: groupIds } },
       select: { courseId: true, courseScore: true, term: { select: { startDate: true } } },
     })
+    const scope = course.equivalenceId === null ? groupIds : [...groupIds, course.equivalenceId]
     return attemptTypeOf(
       effectiveResult(
         attempts.map((attempt) => ({
@@ -444,7 +489,7 @@ export class RegistrationService {
           score: attempt.courseScore === null ? null : Number(attempt.courseScore),
           order: attempt.term.startDate.getTime(),
         })),
-        groupIds,
+        scope,
       ),
     )
   }
@@ -482,6 +527,7 @@ export class RegistrationService {
     context: Context,
     sectionId: number,
     accepted: number[][],
+    outcomes: Map<number, RegistrationResult>,
   ): Promise<RegistrationResult> {
     try {
       return await this.prisma.$transaction(async (tx) => {
@@ -526,6 +572,41 @@ export class RegistrationService {
         })
         if (duplicate || accepted.some((group) => group.some((id) => groupIds.includes(id))))
           throw new RuleFailure('DK-04', { ...detail, courseCode: course.code })
+
+        if (section.parentSectionId !== null) {
+          const parent = await tx.courseSection.findUnique({
+            where: { id: section.parentSectionId },
+            include: { offeredCourse: { include: { course: true } } },
+          })
+          if (!parent || parent.offeredCourse.termId !== term.id)
+            throw new RuleFailure('DK-11', detail)
+          const parentCourse = parent.offeredCourse.course
+          const theoryPassed =
+            (await this.attemptFor(
+              context.student.id,
+              parentCourse,
+              await this.equivalenceIds(parentCourse, tx),
+              tx,
+            )) === AttemptType.IMPROVEMENT
+          if (!theoryPassed) {
+            const parentEnrollment = await tx.enrollment.findFirst({
+              where: {
+                formId: form.id,
+                sectionId: parent.id,
+                status: { not: 'CANCELLED' },
+              },
+            })
+            if (!parentEnrollment) {
+              const batchParent = outcomes.get(parent.id)
+              throw new RuleFailure(
+                'DK-11',
+                batchParent && !batchParent.ok
+                  ? { ...detail, parentCode: parent.code, parentFailed: 'true' }
+                  : detail,
+              )
+            }
+          }
+        }
 
         const attemptType = await this.attemptFor(context.student.id, course, groupIds, tx)
         // DK-09 last: the conditional UPDATE is the only seat allocator (ADR-0005).
