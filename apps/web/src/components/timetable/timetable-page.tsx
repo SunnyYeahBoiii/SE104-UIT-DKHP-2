@@ -94,13 +94,21 @@ export function TimetablePage() {
   const [originalCode, setOriginalCode] = useState('')
 
   useEffect(() => {
+    let alive = true
     void api<TermsResponse>('/academics/terms')
       .then((data) => {
+        if (!alive) return
         setTerms(data.terms)
         const preferred = data.terms.find((term) => term.phase === 'PREPARATION') ?? data.terms[0]
-        if (preferred) setCode(preferred.code)
+        // Only a default: a late response must never override a term the user already picked.
+        if (preferred) setCode((current) => current || preferred.code)
       })
-      .catch((cause: Error) => setError(cause.message))
+      .catch((cause: Error) => {
+        if (alive) setError(cause.message)
+      })
+    return () => {
+      alive = false
+    }
   }, [])
 
   useEffect(() => {
