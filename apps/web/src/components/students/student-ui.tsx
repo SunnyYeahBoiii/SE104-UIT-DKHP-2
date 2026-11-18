@@ -4,7 +4,14 @@ import { Copy, X } from 'lucide-react'
 import { useState, type FormEvent, type ReactNode } from 'react'
 
 import { Banner, Button, Field, Input } from '@/components/ui'
-import type { Catalogs, Student, StudentPayload } from '@/lib/students'
+import {
+  beforeAfterRows,
+  formatMoney,
+  type Catalogs,
+  type Student,
+  type StudentPayload,
+  type TuitionPreviewTerm,
+} from '@/lib/students'
 
 export function StudentForm({
   initial,
@@ -258,12 +265,80 @@ export function OneTimeSecretDialog({
   )
 }
 
+/** A.3.5 BeforeAfter: the five tuition figures the officer compares before confirming HP-12. */
+export function BeforeAfter({ term }: { term: TuitionPreviewTerm }) {
+  return (
+    <div className="overflow-x-auto rounded-sm border border-line">
+      <table className="w-full min-w-[420px] text-left text-sm">
+        <thead className="bg-neutral-50 text-xs text-muted">
+          <tr>
+            <th className="p-2">Khoản mục</th>
+            <th className="p-2 text-right">Trước</th>
+            <th className="p-2 text-right">Sau</th>
+          </tr>
+        </thead>
+        <tbody>
+          {beforeAfterRows(term).map((row) => (
+            <tr key={row.key} className="border-t border-line">
+              <td className="p-2 text-ink">{row.label}</td>
+              <td className="p-2 text-right text-muted tabular-nums">{formatMoney(row.before)}</td>
+              <td className="p-2 text-right tabular-nums">
+                <span
+                  className={
+                    row.delta > 0
+                      ? 'text-danger-700'
+                      : row.delta < 0
+                        ? 'text-success-700'
+                        : 'text-ink'
+                  }
+                >
+                  {formatMoney(row.after)}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+export function NoticeDialog({
+  title,
+  message,
+  onClose,
+}: {
+  title: string
+  message: ReactNode
+  onClose: () => void
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/50 p-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="w-full max-w-lg space-y-4 rounded-md border border-line bg-surface p-6 shadow-lg"
+      >
+        <h2 className="text-xl font-semibold text-ink">{title}</h2>
+        <Banner tone="warning">{message}</Banner>
+        <div className="flex justify-end">
+          <Button type="button" onClick={onClose}>
+            Đã hiểu
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function ConfirmDialog({
   title,
   message,
   confirmLabel,
   requireCode,
   busy,
+  tone = 'danger',
   onConfirm,
   onCancel,
 }: {
@@ -272,6 +347,7 @@ export function ConfirmDialog({
   confirmLabel: string
   requireCode?: string
   busy: boolean
+  tone?: 'primary' | 'danger'
   onConfirm: () => void
   onCancel: () => void
 }) {
@@ -302,13 +378,7 @@ export function ConfirmDialog({
           <Button type="button" variant="secondary" onClick={onCancel}>
             Huỷ
           </Button>
-          <Button
-            type="button"
-            variant="danger"
-            disabled={!ready}
-            loading={busy}
-            onClick={onConfirm}
-          >
+          <Button type="button" variant={tone} disabled={!ready} loading={busy} onClick={onConfirm}>
             {confirmLabel}
           </Button>
         </div>
