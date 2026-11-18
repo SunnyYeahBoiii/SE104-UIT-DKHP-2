@@ -1,4 +1,5 @@
 import { AcademicCatalog } from '@/components/academic-catalog'
+import { FinanceSettings } from '@/components/finance-settings'
 import { EmptyPlaceholder } from '@/components/placeholder'
 import { TimetablePage } from '@/components/timetable/timetable-page'
 
@@ -25,5 +26,6 @@ export default async function StaffSectionPage({
   const { section } = await params
   if (section === 'groups') return <AcademicCatalog />
   if (section === 'sections') return <TimetablePage />
+  if (section === 'fees') return <FinanceSettings />
   return <EmptyPlaceholder title={TITLES[section] ?? 'Không tìm thấy trang'} />
 }
