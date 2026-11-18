@@ -1,5 +1,5 @@
-import { EmptyPlaceholder } from '@/components/placeholder'
+import { RegistrationPage } from '@/components/registration/registration-page'
 
-export default function RegistrationPage() {
-  return <EmptyPlaceholder title="Đăng ký học phần" />
+export default function Page() {
+  return <RegistrationPage />
 }
